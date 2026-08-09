@@ -30,6 +30,7 @@ list_of_files = [
     f"{project_name}/utils/__init__.py",
     f"{project_name}/utils/main_utils.py",
     f"{project_name}/configs/.gitkeep",
+    "tests/__init__.py",
     "README.md",
     "LICENSE",
     ".gitignore",
