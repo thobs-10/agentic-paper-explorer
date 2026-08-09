@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# custom 
+.github/agents/*
+AGENTS.md
+project.md
+copilot-instructions.md
