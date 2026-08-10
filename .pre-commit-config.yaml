@@ -42,7 +42,14 @@ repos:
     rev: 1.7.8
     hooks:
       - id: bandit
+        name: bandit
         args: ["-c", "pyproject.toml"]
+        files: ^src/
+        additional_dependencies: [".[toml]"]
+      - id: bandit
+        name: bandit-tests
+        args: ["-c", "pyproject.toml", "-s", "B101"]
+        files: ^tests/
         additional_dependencies: [".[toml]"]
 
   - repo: https://github.com/gitleaks/gitleaks
