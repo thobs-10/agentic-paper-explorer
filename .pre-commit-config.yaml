@@ -1,0 +1,71 @@
+repos:
+  # ---- Basic file checks & best practices ----
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+      - id: detect-private-key
+      - id: check-ast
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: debug-statements # catches stray pdb.set_trace(), print() left from debugging
+      - id: name-tests-test # ensures test files start with test_
+        args: ["--pytest-test-first"]
+      - id: check-docstring-first
+      - id: destroyed-symlinks
+
+  # ---- Linting & formatting ----
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.2
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # ---- Type checking ----
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        additional_dependencies: [pydantic, types-requests] # match the actual stubs/deps
+
+  # ---- Security ----
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.8
+    hooks:
+      - id: bandit
+        name: bandit
+        args: ["-c", "pyproject.toml"]
+        files: ^src/
+        additional_dependencies: [".[toml]"]
+      - id: bandit
+        name: bandit-tests
+        args: ["-c", "pyproject.toml", "-s", "B101"]
+        files: ^tests/
+        additional_dependencies: [".[toml]"]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks # scans diffs for secrets/tokens, complements detect-private-key
+
+  # ---- Dependency / lockfile hygiene (uv-specific) ----
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.5.18
+    hooks:
+      - id: uv-lock # fails if pyproject.toml changed but uv.lock wasn't regenerated
+
+  # ---- Commit message convention (optional but nice) ----
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
