@@ -2,6 +2,7 @@
 
 import asyncio
 
+import httpx
 import pytest
 from defusedxml import ElementTree as DefusedElementTree
 
@@ -84,7 +85,6 @@ def test_search_papers_uses_asyncio_to_thread(monkeypatch: pytest.MonkeyPatch) -
 def test_search_papers_sync_builds_request_and_reads_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = ArxivClient(timeout_seconds=12.5)
     expected = ArxivSearchResult(total_results=1, start_index=1, items_per_page=2, papers=[])
     captured_payload: dict[str, str] = {}
     captured_request: dict[str, object] = {}
@@ -100,16 +100,12 @@ def test_search_papers_sync_builds_request_and_reads_payload(
             captured_request["timeout"] = timeout
             captured_request["headers"] = headers
 
-        def __enter__(self) -> "FakeHttpxClient":
-            captured_request["entered"] = True
-            return self
-
-        def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-            captured_request["exited"] = True
-
         def get(self, request_url: str) -> FakeResponse:
             captured_request["request_url"] = request_url
             return FakeResponse()
+
+        def close(self) -> None:
+            captured_request["closed"] = True
 
     def fake_parse(payload: str) -> ArxivSearchResult:
         captured_payload["value"] = payload
@@ -118,6 +114,7 @@ def test_search_papers_sync_builds_request_and_reads_payload(
     monkeypatch.setattr(arxiv_module.httpx, "Client", FakeHttpxClient)
     monkeypatch.setattr(ArxivClient, "parse_search_response", staticmethod(fake_parse))
 
+    client = ArxivClient(timeout_seconds=12.5, min_request_interval_seconds=0)
     result = client._search_papers_sync(search_query="all:graph neural", start=2, max_results=5)
 
     assert captured_request["request_url"] == (
@@ -125,10 +122,95 @@ def test_search_papers_sync_builds_request_and_reads_payload(
     )
     assert captured_request["headers"] == {"User-Agent": "agentic-paper-explorer/0.1.0"}
     assert captured_request["timeout"] == 12.5
-    assert captured_request["entered"] is True
-    assert captured_request["exited"] is True
     assert captured_payload["value"] == "<feed></feed>"
     assert result is expected
+
+    client.close()
+    assert captured_request["closed"] is True
+
+
+def test_get_with_retry_retries_on_retryable_status_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArxivClient(max_retries=2, retry_backoff_seconds=0, min_request_interval_seconds=0)
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(arxiv_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    class FailingThenOkResponse:
+        def __init__(self, status_code: int | None) -> None:
+            self._status_code = status_code
+            self.text = "<feed></feed>"
+
+        def raise_for_status(self) -> None:
+            if self._status_code is not None:
+                request = httpx.Request("GET", "https://example.test")
+                raise httpx.HTTPStatusError(
+                    "server error",
+                    request=request,
+                    response=httpx.Response(self._status_code, request=request),
+                )
+
+    responses = iter([FailingThenOkResponse(503), FailingThenOkResponse(None)])
+    monkeypatch.setattr(client._client, "get", lambda _url: next(responses))
+
+    payload = client._get_with_retry("https://example.test")
+
+    assert payload == "<feed></feed>"
+    assert len(sleep_calls) == 1
+
+
+def test_get_with_retry_raises_immediately_on_non_retryable_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArxivClient(max_retries=3, retry_backoff_seconds=0, min_request_interval_seconds=0)
+
+    class BadRequestResponse:
+        def raise_for_status(self) -> None:
+            request = httpx.Request("GET", "https://example.test")
+            raise httpx.HTTPStatusError(
+                "bad request",
+                request=request,
+                response=httpx.Response(400, request=request),
+            )
+
+    monkeypatch.setattr(client._client, "get", lambda _url: BadRequestResponse())
+
+    with pytest.raises(httpx.HTTPStatusError):
+        client._get_with_retry("https://example.test")
+
+
+def test_get_with_retry_raises_after_exhausting_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArxivClient(max_retries=2, retry_backoff_seconds=0, min_request_interval_seconds=0)
+    monkeypatch.setattr(arxiv_module.time, "sleep", lambda _seconds: None)
+
+    class AlwaysTimesOut:
+        def raise_for_status(self) -> None:
+            return None
+
+    def fake_get(_url: str) -> AlwaysTimesOut:
+        raise httpx.TimeoutException("timed out")
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+
+    with pytest.raises(httpx.TimeoutException):
+        client._get_with_retry("https://example.test")
+
+
+def test_wait_for_rate_limit_sleeps_for_remaining_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArxivClient(min_request_interval_seconds=3.0)
+    monotonic_values = iter([101.0, 101.0])
+    monkeypatch.setattr(arxiv_module.time, "monotonic", lambda: next(monotonic_values))
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(arxiv_module.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+    client._last_request_at = 100.0
+
+    client._wait_for_rate_limit()
+
+    assert sleep_calls == [pytest.approx(2.0)]
 
 
 def test_parse_search_response_fetches_root_entries_and_returns_result(

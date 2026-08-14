@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any, Final
 from urllib.parse import urlencode
@@ -17,6 +18,8 @@ ATOM_NAMESPACE: Final[dict[str, str]] = {
 }
 ARXIV_API_URL: Final[str] = "https://export.arxiv.org/api/query"
 ARXIV_USER_AGENT: Final[str] = "agentic-paper-explorer/0.1.0"
+# arXiv responds with these on transient upstream issues; anything else fails fast.
+RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({500, 502, 503, 504})
 
 
 @dataclass(slots=True, frozen=True)
@@ -54,9 +57,30 @@ class ArxivClient:
         self,
         base_url: str = ARXIV_API_URL,
         timeout_seconds: float = 15.0,
+        max_retries: int = 3,
+        retry_backoff_seconds: float = 1.0,
+        min_request_interval_seconds: float = 3.0,
     ) -> None:
         self._base_url = base_url
         self._timeout_seconds = timeout_seconds
+        self._max_retries = max_retries
+        self._retry_backoff_seconds = retry_backoff_seconds
+        self._min_request_interval_seconds = min_request_interval_seconds
+        # A single pooled client is reused across calls instead of one per request.
+        self._client = httpx.Client(
+            timeout=timeout_seconds, headers={"User-Agent": ARXIV_USER_AGENT}
+        )
+        self._last_request_at: float | None = None
+
+    def close(self) -> None:
+        """Release the underlying HTTP connection pool."""
+        self._client.close()
+
+    def __enter__(self) -> ArxivClient:
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
 
     async def search_papers(
         self,
@@ -107,13 +131,38 @@ class ArxivClient:
             }
         )
         request_url = f"{self._base_url}?{query_string}"
-        with httpx.Client(
-            timeout=self._timeout_seconds, headers={"User-Agent": ARXIV_USER_AGENT}
-        ) as client:
-            response = client.get(request_url)
-            response.raise_for_status()
-            payload = response.text
+        payload = self._get_with_retry(request_url)
         return self.parse_search_response(payload)
+
+    def _get_with_retry(self, request_url: str) -> str:
+        """Fetch a URL, rate-limited and with bounded retries on transient failures."""
+        last_error: Exception | None = None
+        for attempt in range(self._max_retries + 1):
+            # custom rate limiting to avoid hitting arXiv's request limits
+            self._wait_for_rate_limit()
+            try:
+                response = self._client.get(request_url)
+                response.raise_for_status()
+                return response.text
+            except httpx.TimeoutException as exc:
+                last_error = exc
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code not in RETRYABLE_STATUS_CODES:
+                    raise
+                last_error = exc
+            if attempt < self._max_retries:
+                time.sleep(self._retry_backoff_seconds * (2**attempt))
+        raise last_error  # type: ignore[misc]
+
+    def _wait_for_rate_limit(self) -> None:
+        """Enforce a minimum spacing between outgoing arXiv requests."""
+        if self._last_request_at is not None:
+            remaining = self._min_request_interval_seconds - (
+                time.monotonic() - self._last_request_at
+            )
+            if remaining > 0:
+                time.sleep(remaining)
+        self._last_request_at = time.monotonic()
 
     @staticmethod
     def parse_search_response(payload: str) -> ArxivSearchResult:
