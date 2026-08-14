@@ -100,9 +100,14 @@ uv run bandit -r src
 
 Tests cover Atom parsing, offload to `asyncio.to_thread`, request URL construction, the bounded success path, and the 502 upstream-failure path. All external HTTP calls are mocked, so the suite is deterministic and offline.
 
+### Phase 0 hardening
+
+Before Phase 1 ingestion pipelines were built, the following gaps were closed:
+
+- CORS origins are now read from `ALLOWED_ORIGINS` via [settings.py](src/agentic_paper_explorer/configs/settings.py) instead of a hardcoded wildcard.
+- `ArxivClient` reuses one pooled `httpx.Client` for its lifetime (created once via a FastAPI `lifespan` hook in [router.py](src/agentic_paper_explorer/ingestion/api/router.py)) instead of opening a new client per request.
+- Requests to arXiv are rate-limited (`ARXIV_MIN_REQUEST_INTERVAL_SECONDS`, default 3s) and retried with exponential backoff on transient 5xx/timeout responses (`ARXIV_MAX_RETRIES`, `ARXIV_RETRY_BACKOFF_SECONDS`).
+
 ### Known gaps carried into Phase 1
 
-- CORS is currently open (`allow_origins=["*"]`); tighten before any non-local deployment.
-- No retry, backoff, or rate limiting against arXiv yet.
 - `ingestion/pipeline.py` is still empty - parallel batch orchestration, deduplication, and Qdrant writes are Phase 1 work.
-- The client creates a new `httpx.Client` per call; a shared, reused client is a Phase 1 optimization.
