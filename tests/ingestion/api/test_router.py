@@ -52,10 +52,25 @@ class FailingArxivClient:
         raise RuntimeError("upstream arxiv failed")
 
 
-def test_get_arxiv_client_returns_arxiv_client_instance() -> None:
-    client = get_arxiv_client()
+def test_get_arxiv_client_returns_client_from_app_state() -> None:
+    class FakeState:
+        arxiv_client = ArxivClient()
 
-    assert isinstance(client, ArxivClient)
+    class FakeApp:
+        state = FakeState()
+
+    class FakeRequest:
+        app = FakeApp()
+
+    try:
+        assert get_arxiv_client(FakeRequest()) is FakeApp.state.arxiv_client  # type: ignore[arg-type]
+    finally:
+        FakeState.arxiv_client.close()
+
+
+def test_lifespan_creates_and_closes_shared_arxiv_client() -> None:
+    with TestClient(app):
+        assert isinstance(app.state.arxiv_client, ArxivClient)
 
 
 def test_search_arxiv_papers_returns_bounded_response() -> None:
