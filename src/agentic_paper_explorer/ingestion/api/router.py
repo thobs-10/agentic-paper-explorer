@@ -1,8 +1,12 @@
 """API router for arXiv ingestion queries."""
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
+
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+from agentic_paper_explorer.configs.settings import get_settings
 from agentic_paper_explorer.ingestion.api.models import (
     ArxivPaperResponse,
     ArxivSearchRequest,
@@ -10,18 +14,33 @@ from agentic_paper_explorer.ingestion.api.models import (
 )
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import ArxivClient
 
-DEFAULT_ALLOWED_ORIGINS = ["*"]
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Create one pooled arXiv client for the app's lifetime and close it on shutdown."""
+    app.state.arxiv_client = ArxivClient(
+        base_url=settings.arxiv_base_url,
+        timeout_seconds=settings.arxiv_timeout_seconds,
+        max_retries=settings.arxiv_max_retries,
+        retry_backoff_seconds=settings.arxiv_retry_backoff_seconds,
+        min_request_interval_seconds=settings.arxiv_min_request_interval_seconds,
+    )
+    yield
+    app.state.arxiv_client.close()
 
 
 app = FastAPI(
     title="arXiv paper ingestion API",
     description="API for ingesting arXiv papers into the agentic paper explorer system",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=DEFAULT_ALLOWED_ORIGINS,
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -31,10 +50,10 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api/v1/ingestion", tags=["ingestion"])
 
 
-def get_arxiv_client() -> ArxivClient:
-    """Create the arXiv client dependency for route handlers."""
+def get_arxiv_client(request: Request) -> ArxivClient:
+    """Return the shared arXiv client created at app startup."""
 
-    return ArxivClient()
+    return request.app.state.arxiv_client
 
 
 def build_search_request(
