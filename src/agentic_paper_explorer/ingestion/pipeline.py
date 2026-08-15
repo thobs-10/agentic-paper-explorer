@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
+import asyncio
+import sys
 from dataclasses import dataclass
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agentic_paper_explorer.backend.database.qdrant_client import QdrantPoint, QdrantRepository
 from agentic_paper_explorer.configs.settings import get_settings
@@ -95,9 +98,9 @@ async def run_ingestion_pipeline(
     return IngestionSummary(papers_processed=papers_processed, chunks_upserted=chunks_upserted)
 
 
-def _chunk_point_id(chunk: PaperChunk) -> str:
+def _chunk_point_id(chunk: PaperChunk) -> UUID:
     """Build a deterministic point ID so re-ingestion upserts instead of duplicating."""
-    return str(uuid5(NAMESPACE_URL, f"{chunk.paper_id}:{chunk.chunk_index}"))
+    return uuid5(NAMESPACE_URL, f"{chunk.paper_id}:{chunk.chunk_index}")
 
 
 def _chunk_payload(chunk: PaperChunk) -> dict[str, object]:
@@ -115,12 +118,35 @@ def _chunk_payload(chunk: PaperChunk) -> dict[str, object]:
     }
 
 
-if __name__ == "__main__":
-    import asyncio
+def main(argv: list[str] | None = None) -> int:
+    """Parse CLI arguments and execute a bounded ingestion pipeline run."""
+    parser = argparse.ArgumentParser(
+        description="Fetch arXiv papers, chunk them, embed them, and store them in Qdrant."
+    )
+    parser.add_argument(
+        "search_query", nargs="?", help="The arXiv search query, for example: all:transformer"
+    )
+    parser.add_argument(
+        "--max-results",
+        type=int,
+        default=10,
+        help="Cap on the number of papers to process across all pages. Defaults to 10 for CLI safety.",
+    )
+    args = parser.parse_args(argv)
 
-    # Example usage: run the ingestion pipeline for a specific search query
-    search_query = "all:KV inference for transformers"
-    summary = asyncio.run(run_ingestion_pipeline(search_query))
+    if not args.search_query:
+        parser.print_usage(sys.stderr)
+        print("error: a search query is required", file=sys.stderr)
+        return 2
+
+    summary = asyncio.run(
+        run_ingestion_pipeline(args.search_query, max_total_results=args.max_results)
+    )
     print(
         f"Processed {summary.papers_processed} papers and upserted {summary.chunks_upserted} chunks."
     )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
