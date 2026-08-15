@@ -76,6 +76,41 @@ class QdrantRepository:
             ],
         )
 
+    async def search_points(
+        self,
+        *,
+        query_vector: list[float],
+        limit: int,
+        score_threshold: float | None = None,
+    ) -> list[dict[str, object]]:
+        """Return the highest-scoring points for a vector query."""
+        matches = await self._client.search(
+            collection_name=self._collection_name,
+            query_vector=query_vector,
+            limit=limit,
+            score_threshold=score_threshold,
+        )
+        normalized_matches: list[dict[str, object]] = []
+        for match in matches:
+            if isinstance(match, dict):
+                normalized_matches.append(
+                    {
+                        "id": match.get("id"),
+                        "score": match.get("score", 0.0),
+                        "payload": match.get("payload", {}),
+                    }
+                )
+                continue
+
+            normalized_matches.append(
+                {
+                    "id": getattr(match, "id", None),
+                    "score": getattr(match, "score", 0.0),
+                    "payload": getattr(match, "payload", {}),
+                }
+            )
+        return normalized_matches
+
     async def close(self) -> None:
         """Release the underlying Qdrant connection."""
         await self._client.close()
