@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     # Embedding settings
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
 
+    # LLM settings
+    llm_api_base: str = "http://localhost:4000"
+    llm_api_key: str = ""
+    llm_model_name: str = "openai/gpt-4o-mini"
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 512
+
     # Chunking settings
     chunk_max_characters: int = 1800
     chunk_overlap_characters: int = 200
