@@ -18,8 +18,8 @@ ATOM_NAMESPACE: Final[dict[str, str]] = {
 }
 ARXIV_API_URL: Final[str] = "https://export.arxiv.org/api/query"
 ARXIV_USER_AGENT: Final[str] = "agentic-paper-explorer/0.1.0"
-# arXiv responds with these on transient upstream issues; anything else fails fast.
-RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({500, 502, 503, 504})
+# arXiv rate limits and transient upstream issues are retried; anything else fails fast.
+RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(slots=True, frozen=True)
