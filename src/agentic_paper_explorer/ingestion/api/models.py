@@ -44,3 +44,25 @@ class ArxivSearchResponse(BaseModel):
     start_index: int
     items_per_page: int
     papers: list[ArxivPaperResponse]
+
+
+class IngestionProcessRequest(BaseModel):
+    """Request payload for triggering the ingestion pipeline from a UI prompt."""
+
+    search_query: str = Field(
+        min_length=1, description="arXiv query to process, for example all:transformer"
+    )
+    max_results: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Optional cap on processed paper count for the pipeline run.",
+    )
+
+
+class IngestionProcessResponse(BaseModel):
+    """Summary returned after the ingestion pipeline runs."""
+
+    search_query: str
+    papers_processed: int
+    chunks_upserted: int
