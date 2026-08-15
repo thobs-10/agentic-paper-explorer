@@ -150,7 +150,7 @@ def test_get_with_retry_retries_on_retryable_status_then_succeeds(
                     response=httpx.Response(self._status_code, request=request),
                 )
 
-    responses = iter([FailingThenOkResponse(503), FailingThenOkResponse(None)])
+    responses = iter([FailingThenOkResponse(429), FailingThenOkResponse(None)])
     monkeypatch.setattr(client._client, "get", lambda _url: next(responses))
 
     payload = client._get_with_retry("https://example.test")
