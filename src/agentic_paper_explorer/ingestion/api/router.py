@@ -11,8 +11,11 @@ from agentic_paper_explorer.ingestion.api.models import (
     ArxivPaperResponse,
     ArxivSearchRequest,
     ArxivSearchResponse,
+    IngestionProcessRequest,
+    IngestionProcessResponse,
 )
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import ArxivClient
+from agentic_paper_explorer.ingestion.pipeline import run_ingestion_pipeline
 
 settings = get_settings()
 
@@ -98,6 +101,20 @@ async def search_arxiv_papers(
             ArxivPaperResponse.model_validate(paper, from_attributes=True)
             for paper in result.papers
         ],
+    )
+
+
+@api_router.post("/papers/process", response_model=IngestionProcessResponse)
+async def process_arxiv_papers(request: IngestionProcessRequest) -> IngestionProcessResponse:
+    """Run the Phase 1 ingestion pipeline for a user-provided search prompt."""
+    summary = await run_ingestion_pipeline(
+        request.search_query,
+        max_total_results=request.max_results,
+    )
+    return IngestionProcessResponse(
+        search_query=request.search_query,
+        papers_processed=summary.papers_processed,
+        chunks_upserted=summary.chunks_upserted,
     )
 
 

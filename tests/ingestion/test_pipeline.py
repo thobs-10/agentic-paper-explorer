@@ -187,3 +187,45 @@ def test_chunk_payload_includes_expected_fields() -> None:
         "pdf_url": "https://arxiv.org/pdf/paper-1",
         "entry_url": "https://arxiv.org/abs/paper-1",
     }
+
+
+def test_main_runs_pipeline_for_query(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def fake_run_ingestion_pipeline(
+        search_query: str, *, max_total_results: int | None = None
+    ) -> object:
+        assert search_query == "all:transformer"
+        assert max_total_results == 5
+        return pipeline_module.IngestionSummary(papers_processed=7, chunks_upserted=21)
+
+    monkeypatch.setattr(pipeline_module, "run_ingestion_pipeline", fake_run_ingestion_pipeline)
+    monkeypatch.setattr("sys.argv", ["pipeline.py", "all:transformer", "--max-results", "5"])
+
+    exit_code = pipeline_module.main()
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Processed 7 papers" in captured.out
+    assert "21 chunks" in captured.out
+
+
+def test_main_uses_safe_default_max_results(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def fake_run_ingestion_pipeline(
+        search_query: str, *, max_total_results: int | None = None
+    ) -> object:
+        assert search_query == "all:transformer"
+        assert max_total_results == 10
+        return pipeline_module.IngestionSummary(papers_processed=2, chunks_upserted=4)
+
+    monkeypatch.setattr(pipeline_module, "run_ingestion_pipeline", fake_run_ingestion_pipeline)
+    monkeypatch.setattr("sys.argv", ["pipeline.py", "all:transformer"])
+
+    exit_code = pipeline_module.main()
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "Processed 2 papers" in captured.out
+    assert "4 chunks" in captured.out

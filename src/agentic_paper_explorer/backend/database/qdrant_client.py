@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -12,7 +13,7 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 class QdrantPoint:
     """A single vector point to store in Qdrant, decoupled from any caller's domain model."""
 
-    point_id: str
+    point_id: str | int | UUID
     vector: list[float]
     payload: dict[str, object]
 
@@ -50,10 +51,27 @@ class QdrantRepository:
         """
         if not points:
             return
+
+        def _coerce_point_id(point_id: str | int | UUID) -> str | int | UUID:
+            if isinstance(point_id, int):
+                return point_id
+            if isinstance(point_id, UUID):
+                return point_id
+            try:
+                return UUID(str(point_id))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Qdrant point IDs must be UUIDs or integers; received {point_id!r}."
+                ) from exc
+
         await self._client.upsert(
             collection_name=self._collection_name,
             points=[
-                PointStruct(id=point.point_id, vector=point.vector, payload=point.payload)
+                PointStruct(
+                    id=_coerce_point_id(point.point_id),
+                    vector=point.vector,
+                    payload=point.payload,
+                )
                 for point in points
             ],
         )

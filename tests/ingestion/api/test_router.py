@@ -1,7 +1,9 @@
 """Tests for the ingestion API router."""
 
+import pytest
 from fastapi.testclient import TestClient
 
+from agentic_paper_explorer.ingestion import pipeline as pipeline_module
 from agentic_paper_explorer.ingestion.api.router import app, get_arxiv_client
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
     ArxivClient,
@@ -105,3 +107,30 @@ def test_search_arxiv_papers_returns_502_on_upstream_failure() -> None:
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Failed to fetch data from arXiv"}
+
+
+def test_process_papers_runs_pipeline_from_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_run_ingestion_pipeline(
+        search_query: str, *, max_total_results: int | None = None
+    ) -> pipeline_module.IngestionSummary:
+        assert search_query == "all:transformer"
+        assert max_total_results == 5
+        return pipeline_module.IngestionSummary(papers_processed=7, chunks_upserted=21)
+
+    monkeypatch.setattr(
+        "agentic_paper_explorer.ingestion.api.router.run_ingestion_pipeline",
+        fake_run_ingestion_pipeline,
+    )
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/ingestion/papers/process",
+        json={"search_query": "all:transformer", "max_results": 5},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "search_query": "all:transformer",
+        "papers_processed": 7,
+        "chunks_upserted": 21,
+    }
