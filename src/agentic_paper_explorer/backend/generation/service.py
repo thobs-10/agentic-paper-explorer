@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -27,6 +28,14 @@ class ProviderProtocol(Protocol):
         temperature: float = 0.2,
     ) -> str: ...
 
+    def generate_stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[str]: ...
+
 
 @dataclass(slots=True)
 class GenerationResult:
@@ -35,6 +44,14 @@ class GenerationResult:
     answer: str
     sources: list[str] = field(default_factory=list)
     model: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class GenerationStreamEvent:
+    """Client-facing event emitted while an answer is being generated."""
+
+    event: str
+    data: dict[str, object]
 
 
 class GenerationService:
@@ -126,6 +143,48 @@ class GenerationService:
             answer=answer_text,
             sources=self._source_urls(ordered_chunks),
             model=self._model,
+        )
+
+    async def stream_answer(
+        self, query: str, chunks: list[RetrievedChunk]
+    ) -> AsyncIterator[GenerationStreamEvent]:
+        """Stream answer deltas followed by completion metadata."""
+        ordered_chunks = self._order_chunks(chunks)
+        sources = self._source_urls(ordered_chunks)
+        if not any(chunk.text.strip() for chunk in ordered_chunks):
+            yield GenerationStreamEvent(
+                event="chunk",
+                data={"text": INSUFFICIENT_CONTEXT_MESSAGE},
+            )
+            yield self._complete_event(sources)
+            return
+
+        prompt = self.build_prompt(query, chunks)
+        try:
+            async for delta in self._provider.generate_stream(
+                prompt=prompt,
+                system_prompt=self._system_prompt,
+                temperature=self._temperature,
+            ):
+                yield GenerationStreamEvent(event="chunk", data={"text": delta})
+        except ProviderError as exc:
+            logger.error("Streaming generation fallback used category=%s", exc.category)
+            yield GenerationStreamEvent(
+                event="chunk",
+                data={"text": "I could not complete the answer. Please try again shortly."},
+            )
+        except Exception:
+            logger.exception("Streaming generation fallback used for unexpected provider failure")
+            yield GenerationStreamEvent(
+                event="chunk",
+                data={"text": "I could not complete the answer. Please try again shortly."},
+            )
+        yield self._complete_event(sources)
+
+    def _complete_event(self, sources: list[str]) -> GenerationStreamEvent:
+        return GenerationStreamEvent(
+            event="complete",
+            data={"sources": sources, "model": self._model},
         )
 
     async def generate(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:

@@ -43,6 +43,32 @@ class FailingProvider:
         raise ProviderError("rate limited", category="rate_limit", retryable=True)
 
 
+class StreamingProvider:
+    def __init__(self, deltas: list[str]) -> None:
+        self.deltas = deltas
+        self.calls: list[dict[str, object]] = []
+
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ) -> str:
+        return "".join(self.deltas)
+
+    async def generate_stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ):
+        self.calls.append({"prompt": prompt, "system_prompt": system_prompt})
+        for delta in self.deltas:
+            yield delta
+
+
 def test_generation_service_uses_detailed_default_system_prompt() -> None:
     service = GenerationService(provider=FakeProvider())
 
@@ -119,6 +145,62 @@ def test_generation_service_abstains_without_usable_context() -> None:
     assert result.answer == INSUFFICIENT_CONTEXT_MESSAGE
     assert result.sources == ["https://arxiv.org/abs/paper-empty"]
     assert result.model == "test-model"
+    assert provider.calls == []
+
+
+def test_generation_service_streams_partial_output_and_completion_metadata() -> None:
+    provider = StreamingProvider(["Grounded ", "answer [1]."])
+    service = GenerationService(provider=provider, model="test-model")
+    chunks = [
+        RetrievedChunk(
+            paper_id="paper-stream",
+            title="Streaming Generation",
+            text="Streaming returns partial output.",
+            score=0.9,
+            source_url="https://arxiv.org/abs/paper-stream",
+        )
+    ]
+
+    async def collect():
+        return [event async for event in service.stream_answer("What happens?", chunks)]
+
+    events = asyncio.run(collect())
+
+    assert [(event.event, event.data) for event in events] == [
+        ("chunk", {"text": "Grounded "}),
+        ("chunk", {"text": "answer [1]."}),
+        (
+            "complete",
+            {"sources": ["https://arxiv.org/abs/paper-stream"], "model": "test-model"},
+        ),
+    ]
+    assert provider.calls
+
+
+def test_generation_service_stream_abstains_without_context() -> None:
+    provider = StreamingProvider(["should not be used"])
+    service = GenerationService(provider=provider)
+
+    async def collect():
+        return [
+            event
+            async for event in service.stream_answer(
+                "What happens?",
+                [
+                    RetrievedChunk(
+                        paper_id="paper-empty",
+                        title="Empty",
+                        text="",
+                        score=0.9,
+                    )
+                ],
+            )
+        ]
+
+    events = asyncio.run(collect())
+
+    assert events[0].data["text"].startswith("I do not have enough")
+    assert events[-1].event == "complete"
     assert provider.calls == []
 
 

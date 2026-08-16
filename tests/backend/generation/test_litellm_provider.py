@@ -204,3 +204,36 @@ def test_litellm_provider_retries_server_and_network_errors(monkeypatch):
 
     assert asyncio.run(provider.generate(prompt="recover me")) == "recovered"
     assert calls == 3
+
+
+def test_litellm_provider_streams_partial_deltas(monkeypatch):
+    fake_module = types.ModuleType("litellm")
+    calls: list[dict[str, object]] = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+
+        async def response_stream():
+            for text in ("Grounded ", "answer [1]."):
+                yield types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content=text))]
+                )
+
+        return response_stream()
+
+    fake_module.acompletion = fake_acompletion
+    monkeypatch.setitem(sys.modules, "litellm", fake_module)
+
+    from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider
+
+    provider = LiteLLMProvider(
+        model="test-model",
+        api_base="http://localhost:4000",
+        api_key="test-key",
+    )
+
+    async def collect() -> list[str]:
+        return [delta async for delta in provider.generate_stream(prompt="stream me")]
+
+    assert asyncio.run(collect()) == ["Grounded ", "answer [1]."]
+    assert calls[0]["stream"] is True

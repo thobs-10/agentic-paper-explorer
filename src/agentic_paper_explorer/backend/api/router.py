@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from agentic_paper_explorer.backend.api.models import GenerationRequest, GenerationResponse
 from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider
-from agentic_paper_explorer.backend.generation.service import GenerationResult, GenerationService
+from agentic_paper_explorer.backend.generation.service import (
+    GenerationResult,
+    GenerationService,
+    GenerationStreamEvent,
+)
 from agentic_paper_explorer.backend.retrieval.service import RetrievalResult, RetrievalService
 from agentic_paper_explorer.configs.settings import get_settings
 
@@ -101,6 +107,35 @@ async def answer_question(
         sources=generation_result.sources,
         model=generation_result.model,
     )
+
+
+@api_router.post("/generation/answer/stream")
+async def stream_answer_question(
+    request: GenerationRequest,
+    retrieval_service: RetrievalService = Depends(get_retrieval_service),
+    generation_service: GenerationService = Depends(get_generation_service),
+) -> StreamingResponse:
+    """Stream grounded answer text as Server-Sent Events."""
+    retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
+
+    async def events():
+        yield _format_sse_event(GenerationStreamEvent(event="start", data={"query": request.query}))
+        async for event in generation_service.stream_answer(
+            request.query,
+            retrieval_result.chunks,
+        ):
+            yield _format_sse_event(event)
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _format_sse_event(event: GenerationStreamEvent) -> str:
+    """Serialize a generation event using the SSE wire format."""
+    return f"event: {event.event}\ndata: {json.dumps(event.data)}\n\n"
 
 
 app.include_router(api_router)
