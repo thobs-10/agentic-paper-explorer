@@ -288,3 +288,48 @@ The response still includes any available source URLs. This prevents an LLM from
 ```bash
 uv run pytest tests/backend/generation/test_generation_service.py -q
 ```
+
+## Phase 3 - Streaming generation
+
+The streaming endpoint exposes the same grounded generation flow over Server-Sent Events (SSE). The existing JSON endpoint remains available when a client needs one complete response.
+
+### Endpoint
+
+```text
+POST /api/v1/generation/answer/stream
+Content-Type: application/json
+Accept: text/event-stream
+```
+
+Request body:
+
+```json
+{"query":"How does retrieval improve generation?"}
+```
+
+The stream emits three event types:
+
+```text
+event: start
+data: {"query":"How does retrieval improve generation?"}
+
+event: chunk
+data: {"text":"Retrieval provides "}
+
+event: complete
+data: {"sources":["https://arxiv.org/abs/example"],"model":"..."}
+```
+
+- `start` identifies the query.
+- `chunk` contains a partial text delta and may occur many times. Clients should append `text` values in order.
+- `complete` is the terminal event and contains the unique source URLs and model name.
+- If retrieval has no usable context, the stream emits the deterministic abstention message as one `chunk`, followed by `complete`, without calling the provider.
+- If the provider fails after retries, the stream emits a user-safe fallback `chunk` and still terminates with `complete`. Clients can continue displaying already received partial output.
+
+For clients that do not support SSE, use `POST /api/v1/generation/answer`, which returns the complete `GenerationResponse` JSON contract.
+
+### Verification
+
+```bash
+uv run pytest tests/backend/generation tests/backend/api/test_generation_router.py -q
+```
