@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_ALLOWED_ORIGINS = ["http://localhost:8501"]
@@ -35,11 +35,26 @@ class Settings(BaseSettings):
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
 
     # LLM settings
-    llm_api_base: str = "http://localhost:4000"
-    llm_api_key: str = ""
-    llm_model_name: str = "openai/gpt-4o-mini"
-    llm_temperature: float = 0.2
-    llm_max_tokens: int = 512
+    llm_api_base: str = Field(
+        default="http://localhost:4000",
+        validation_alias=AliasChoices("LITELLM_API_BASE", "LLM_API_BASE", "llm_api_base"),
+    )
+    llm_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("LITELLM_API_KEY", "LLM_API_KEY", "llm_api_key"),
+    )
+    llm_model_name: str = Field(
+        default="openrouter/meta-llama/llama-3.2-3b-instruct:free",
+        validation_alias=AliasChoices("LITELLM_MODEL_NAME", "LLM_MODEL_NAME", "llm_model_name"),
+    )
+    llm_temperature: float = Field(
+        default=0.2,
+        validation_alias=AliasChoices("LITELLM_TEMPERATURE", "LLM_TEMPERATURE", "llm_temperature"),
+    )
+    llm_max_tokens: int = Field(
+        default=512,
+        validation_alias=AliasChoices("LITELLM_MAX_TOKENS", "LLM_MAX_TOKENS", "llm_max_tokens"),
+    )
 
     # Chunking settings
     chunk_max_characters: int = 1800
