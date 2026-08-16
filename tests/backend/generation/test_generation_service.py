@@ -1,6 +1,7 @@
 """Tests for prompt assembly and the generation service layer."""
 
 import asyncio
+from collections.abc import AsyncIterator
 
 from agentic_paper_explorer.backend.generation.prompts import (
     DEFAULT_SYSTEM_PROMPT,
@@ -31,6 +32,15 @@ class FakeProvider:
         )
         return "This paper explains retrieval in a modern RAG pipeline."
 
+    async def generate_stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[str]:
+        yield "This paper explains retrieval in a modern RAG pipeline."
+
 
 class FailingProvider:
     async def generate(
@@ -40,6 +50,15 @@ class FailingProvider:
         system_prompt: str | None = None,
         temperature: float = 0.2,
     ) -> str:
+        raise ProviderError("rate limited", category="rate_limit", retryable=True)
+
+    def generate_stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[str]:
         raise ProviderError("rate limited", category="rate_limit", retryable=True)
 
 
