@@ -333,3 +333,22 @@ For clients that do not support SSE, use `POST /api/v1/generation/answer`, which
 ```bash
 uv run pytest tests/backend/generation tests/backend/api/test_generation_router.py -q
 ```
+
+## Phase 4 - Streamlit UI
+
+The Streamlit frontend lives under [frontend](src/agentic_paper_explorer/frontend) and uses the generation API through a small testable HTTP client.
+
+Start the backend and UI in separate terminals:
+
+```bash
+uv run uvicorn agentic_paper_explorer.backend.api.router:app --reload
+uv run streamlit run src/agentic_paper_explorer/frontend/app.py
+```
+
+The UI opens at `http://localhost:8501`. Configure another backend with:
+
+```text
+BACKEND_API_BASE_URL=http://localhost:8000
+```
+
+The UI streams answer chunks by default, displays the final sources and model metadata, warns when a stream ends after partial output, and falls back to the complete JSON endpoint when streaming cannot start. Insufficient retrieval context is shown as a normal abstention state rather than a transport error.
