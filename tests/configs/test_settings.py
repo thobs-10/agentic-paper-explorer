@@ -29,6 +29,7 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         "LLM_TIMEOUT_SECONDS",
         "LLM_MAX_RETRIES",
         "LLM_RETRY_BACKOFF_SECONDS",
+        "BACKEND_API_BASE_URL",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -40,6 +41,7 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.arxiv_max_retries == 3
     assert settings.arxiv_retry_backoff_seconds == 1.0
     assert settings.arxiv_min_request_interval_seconds == 3.0
+    assert settings.backend_api_base_url == "http://localhost:8000"
     assert settings.llm_api_base == "http://localhost:4000"
     assert settings.llm_api_key == ""
     assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
