@@ -259,3 +259,32 @@ LITELLM_RETRY_BACKOFF_SECONDS=0.5
 uv run pytest tests/backend/generation tests/configs/test_settings.py -q
 uv run ruff check src/agentic_paper_explorer/backend/generation src/agentic_paper_explorer/configs/settings.py tests/backend/generation tests/configs/test_settings.py
 ```
+
+## Phase 3 - Grounded prompting and citations
+
+The generation layer uses a citation-aware prompt contract so responses remain traceable to retrieved paper excerpts.
+
+### Answer contract
+
+- Context chunks are ordered by descending retrieval score before they are sent to the provider.
+- Each chunk receives a stable marker such as `[1]` and includes its title, source URL or paper ID, and excerpt text.
+- Every material claim should cite the supporting marker immediately, for example: `The method improves recall [1].`
+- The provider must use only the supplied excerpts and must not invent claims, citations, URLs, or marker numbers.
+- The answer should begin with a concise direct response, followed by brief evidence or limitations when useful.
+- The API returns unique source URLs separately in the `sources` field; the model is instructed not to add a separate references section.
+
+### Insufficient context
+
+When retrieval returns no usable text, generation abstains before calling the provider and returns:
+
+```text
+I do not have enough retrieved paper context to answer this question reliably.
+```
+
+The response still includes any available source URLs. This prevents an LLM from guessing when retrieval did not provide enough evidence.
+
+### Verification
+
+```bash
+uv run pytest tests/backend/generation/test_generation_service.py -q
+```
