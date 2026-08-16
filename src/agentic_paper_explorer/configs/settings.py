@@ -55,6 +55,24 @@ class Settings(BaseSettings):
         default=512,
         validation_alias=AliasChoices("LITELLM_MAX_TOKENS", "LLM_MAX_TOKENS", "llm_max_tokens"),
     )
+    llm_timeout_seconds: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "LITELLM_TIMEOUT_SECONDS", "LLM_TIMEOUT_SECONDS", "llm_timeout_seconds"
+        ),
+    )
+    llm_max_retries: int = Field(
+        default=2,
+        validation_alias=AliasChoices("LITELLM_MAX_RETRIES", "LLM_MAX_RETRIES", "llm_max_retries"),
+    )
+    llm_retry_backoff_seconds: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices(
+            "LITELLM_RETRY_BACKOFF_SECONDS",
+            "LLM_RETRY_BACKOFF_SECONDS",
+            "llm_retry_backoff_seconds",
+        ),
+    )
 
     # Chunking settings
     chunk_max_characters: int = 1800
