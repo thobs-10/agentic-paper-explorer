@@ -13,6 +13,16 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         "ARXIV_MAX_RETRIES",
         "ARXIV_RETRY_BACKOFF_SECONDS",
         "ARXIV_MIN_REQUEST_INTERVAL_SECONDS",
+        "LITELLM_API_BASE",
+        "LITELLM_API_KEY",
+        "LITELLM_MODEL_NAME",
+        "LITELLM_TEMPERATURE",
+        "LITELLM_MAX_TOKENS",
+        "LLM_API_BASE",
+        "LLM_API_KEY",
+        "LLM_MODEL_NAME",
+        "LLM_TEMPERATURE",
+        "LLM_MAX_TOKENS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -24,6 +34,11 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.arxiv_max_retries == 3
     assert settings.arxiv_retry_backoff_seconds == 1.0
     assert settings.arxiv_min_request_interval_seconds == 3.0
+    assert settings.llm_api_base == "http://localhost:4000"
+    assert settings.llm_api_key == ""
+    assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
+    assert settings.llm_temperature == 0.2
+    assert settings.llm_max_tokens == 512
 
 
 def test_settings_parses_comma_separated_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,6 +47,22 @@ def test_settings_parses_comma_separated_allowed_origins(monkeypatch: pytest.Mon
     settings = Settings(_env_file=None)
 
     assert settings.allowed_origins == ["https://a.test", "https://b.test"]
+
+
+def test_settings_reads_litellm_env_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LITELLM_API_BASE", "http://litellm:4000")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-key")
+    monkeypatch.setenv("LITELLM_MODEL_NAME", "openrouter/meta-llama/llama-3.2-3b-instruct:free")
+    monkeypatch.setenv("LITELLM_TEMPERATURE", "0.5")
+    monkeypatch.setenv("LITELLM_MAX_TOKENS", "1024")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.llm_api_base == "http://litellm:4000"
+    assert settings.llm_api_key == "test-key"
+    assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
+    assert settings.llm_temperature == 0.5
+    assert settings.llm_max_tokens == 1024
 
 
 def test_settings_accepts_list_value_for_allowed_origins() -> None:
