@@ -3,7 +3,10 @@
 from fastapi.testclient import TestClient
 
 from agentic_paper_explorer.backend.api.router import app
-from agentic_paper_explorer.backend.generation.service import GenerationResult
+from agentic_paper_explorer.backend.generation.service import (
+    GenerationResult,
+    GenerationStreamEvent,
+)
 from agentic_paper_explorer.backend.retrieval.service import RetrievalResult, RetrievedChunk
 
 
@@ -40,6 +43,13 @@ class StubGenerationService:
             model="stub-model",
         )
 
+    async def stream_answer(self, query: str, chunks: list[RetrievedChunk]):
+        yield GenerationStreamEvent(event="chunk", data={"text": "Partial answer [1]."})
+        yield GenerationStreamEvent(
+            event="complete",
+            data={"sources": ["https://arxiv.org/abs/paper-1"], "model": "stub-model"},
+        )
+
 
 def test_generation_route_wires_retrieval_and_generation() -> None:
     retrieval_service = StubRetrievalService()
@@ -71,3 +81,33 @@ def test_generation_route_wires_retrieval_and_generation() -> None:
     assert payload["sources"] == ["https://arxiv.org/abs/paper-1"]
     assert retrieval_service.calls == ["What is retrieval?"]
     assert generation_service.calls[0][0] == "What is retrieval?"
+
+
+def test_generation_stream_route_returns_sse_events() -> None:
+    retrieval_service = StubRetrievalService()
+    generation_service = StubGenerationService()
+
+    from agentic_paper_explorer.backend.api.router import (
+        get_generation_service,
+        get_retrieval_service,
+    )
+
+    app.dependency_overrides[get_retrieval_service] = lambda: retrieval_service
+    app.dependency_overrides[get_generation_service] = lambda: generation_service
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/generation/answer/stream",
+        json={"query": "What is retrieval?"},
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: start" in response.text
+    assert 'event: chunk\ndata: {"text": "Partial answer [1]."}' in response.text
+    assert (
+        'event: complete\ndata: {"sources": ["https://arxiv.org/abs/paper-1"], "model": "stub-model"}'
+        in response.text
+    )
