@@ -6,7 +6,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from agentic_paper_explorer.backend.generation.prompts import DEFAULT_SYSTEM_PROMPT
+from agentic_paper_explorer.backend.generation.prompts import (
+    DEFAULT_SYSTEM_PROMPT,
+    INSUFFICIENT_CONTEXT_MESSAGE,
+)
 from agentic_paper_explorer.backend.generation.provider import ProviderError
 from agentic_paper_explorer.backend.retrieval.service import RetrievedChunk
 
@@ -51,25 +54,55 @@ class GenerationService:
         self._model = model
 
     def build_prompt(self, query: str, chunks: list[RetrievedChunk]) -> str:
-        """Assemble a generation prompt from a conceptual question and ranked chunks."""
+        """Assemble a citation-aware prompt from the highest-scoring context chunks."""
+        ordered_chunks = self._order_chunks(chunks)
         context_lines = [
-            f"[Source: {chunk.source_url or chunk.paper_id}] {chunk.title}\n{chunk.text}"
-            for chunk in chunks
+            self._format_context_chunk(index, chunk)
+            for index, chunk in enumerate(ordered_chunks, start=1)
         ]
         context_block = (
             "\n\n".join(context_lines) if context_lines else "No paper context was found."
         )
         return (
-            "You are answering from the paper context below.\n\n"
+            "Answer the question using only the numbered paper excerpts below.\n\n"
             f"Question: {query}\n\n"
             "Context:\n"
             f"{context_block}\n\n"
-            "Answer using only the context above. Be concise, evidence-based, and include"
-            " source references when they are relevant."
+            "Return a concise, direct answer. Cite each material claim with the relevant "
+            "numbered marker, for example [1]. If the excerpts do not support an answer, "
+            "say that the evidence is insufficient instead of guessing."
         )
+
+    @staticmethod
+    def _order_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+        """Order chunks by relevance while preserving input order for ties."""
+        return sorted(chunks, key=lambda chunk: chunk.score, reverse=True)
+
+    @staticmethod
+    def _format_context_chunk(index: int, chunk: RetrievedChunk) -> str:
+        """Format one context chunk with a stable citation marker and source identity."""
+        source = chunk.source_url or chunk.paper_id
+        return f"[{index}] {chunk.title}\nSource: {source}\nExcerpt:\n{chunk.text}"
+
+    @staticmethod
+    def _source_urls(chunks: list[RetrievedChunk]) -> list[str]:
+        """Return unique source URLs in ranked context order."""
+        sources: list[str] = []
+        for chunk in chunks:
+            if chunk.source_url and chunk.source_url not in sources:
+                sources.append(chunk.source_url)
+        return sources
 
     async def answer_question(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
         """Generate an answer from the retrieved paper context."""
+        ordered_chunks = self._order_chunks(chunks)
+        if not any(chunk.text.strip() for chunk in ordered_chunks):
+            return GenerationResult(
+                answer=INSUFFICIENT_CONTEXT_MESSAGE,
+                sources=self._source_urls(ordered_chunks),
+                model=self._model,
+            )
+
         prompt = self.build_prompt(query, chunks)
         try:
             answer_text = await self._provider.generate(
@@ -89,8 +122,11 @@ class GenerationService:
                 "I could not generate an answer right now. Please try again shortly. "
                 "The retrieved paper sources are included below for reference."
             )
-        sources = [chunk.source_url for chunk in chunks if chunk.source_url]
-        return GenerationResult(answer=answer_text, sources=sources, model=self._model)
+        return GenerationResult(
+            answer=answer_text,
+            sources=self._source_urls(ordered_chunks),
+            model=self._model,
+        )
 
     async def generate(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
         """Backward-compatible alias for the generation flow."""
