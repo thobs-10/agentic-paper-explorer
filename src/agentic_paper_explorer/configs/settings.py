@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection_name: str = "arxiv_papers"
 
+    # Redis settings
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Retrieval settings
+    retrieval_top_k: int = 5
+    retrieval_score_threshold: float = 0.2
+    retrieval_cache_ttl_seconds: int = 3600
+
     # Frontend settings
     backend_api_base_url: str = Field(
         default="http://localhost:8000",

@@ -1,7 +1,9 @@
 """Tests for the generation API route and retrieval-to-generation wiring."""
 
+import pytest
 from fastapi.testclient import TestClient
 
+from agentic_paper_explorer.backend.api import router as router_module
 from agentic_paper_explorer.backend.api.router import app
 from agentic_paper_explorer.backend.generation.service import (
     GenerationResult,
@@ -56,7 +58,6 @@ def test_generation_route_wires_retrieval_and_generation() -> None:
     generation_service = StubGenerationService()
 
     app.dependency_overrides.clear()
-    app.dependency_overrides[app.dependency_overrides.get] = lambda *args, **kwargs: None
 
     from agentic_paper_explorer.backend.api.router import (
         get_generation_service,
@@ -111,3 +112,52 @@ def test_generation_stream_route_returns_sse_events() -> None:
         'event: complete\ndata: {"sources": ["https://arxiv.org/abs/paper-1"], "model": "stub-model"}'
         in response.text
     )
+
+
+def test_lifespan_wires_qdrant_and_redis_collaborators(monkeypatch: pytest.MonkeyPatch) -> None:
+    created: dict[str, str] = {}
+    closed_caches: list["FakeCache"] = []
+
+    class FakeRepository:
+        def __init__(self, *, url: str, collection_name: str) -> None:
+            created["qdrant_url"] = url
+            created["collection_name"] = collection_name
+            self.closed = False
+
+        async def search_points(self, **kwargs: object) -> list[dict[str, object]]:
+            return []
+
+        async def close(self) -> None:
+            self.closed = True
+
+    class FakeCache:
+        def __init__(self) -> None:
+            self.closed = False
+
+        @classmethod
+        def from_url(cls, url: str) -> "FakeCache":
+            created["redis_url"] = url
+            instance = cls()
+            closed_caches.append(instance)
+            return instance
+
+        async def get(self, key: str) -> object | None:
+            return None
+
+        async def set(self, key: str, value: object, *, ttl: int | None = None) -> None:
+            return None
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(router_module, "QdrantRepository", FakeRepository)
+    monkeypatch.setattr(router_module, "RedisCache", FakeCache)
+
+    app.dependency_overrides.clear()
+    with TestClient(app) as client:
+        assert client.app.state.retrieval_service is not None
+        assert client.app.state.generation_service is not None
+
+    assert created["qdrant_url"] == router_module.settings.qdrant_url
+    assert created["redis_url"] == router_module.settings.redis_url
+    assert closed_caches[0].closed is True

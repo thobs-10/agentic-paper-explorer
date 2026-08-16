@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -106,7 +107,7 @@ class RetrievalService:
             ]
             return RetrievalResult(query=query, chunks=chunks, cached=True)
 
-        query_vector = self._embedder(query)
+        query_vector = await _resolve_embedding(self._embedder(query))
         matches = await self._repository.search_points(
             query_vector=query_vector,
             limit=self._top_k,
@@ -139,3 +140,10 @@ class RetrievalService:
             ttl=self._cache_ttl_seconds,
         )
         return result
+
+
+async def _resolve_embedding(result: Any) -> list[float]:
+    """Accept embedders that return a vector directly or awaitably."""
+    if inspect.isawaitable(result):
+        return await result
+    return result

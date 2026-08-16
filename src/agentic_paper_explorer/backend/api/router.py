@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from agentic_paper_explorer.backend.api.models import GenerationRequest, GenerationResponse
+from agentic_paper_explorer.backend.database.qdrant_client import QdrantRepository
+from agentic_paper_explorer.backend.database.redis_cache import RedisCache
 from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider
 from agentic_paper_explorer.backend.generation.service import (
     GenerationResult,
@@ -18,40 +21,53 @@ from agentic_paper_explorer.backend.generation.service import (
 )
 from agentic_paper_explorer.backend.retrieval.service import RetrievalResult, RetrievalService
 from agentic_paper_explorer.configs.settings import get_settings
+from agentic_paper_explorer.ingestion.processing.embeddings import embed_query
 
 settings = get_settings()
 
 
-class _MemoryCache:
-    """Simple in-memory cache used as a default retrieval backend."""
-
-    def __init__(self) -> None:
-        self._store: dict[str, Any] = {}
-
-    async def get(self, key: str) -> Any | None:
-        return self._store.get(key)
-
-    async def set(self, key: str, value: Any, *, ttl: int | None = None) -> None:
-        self._store[key] = value
-
-
-class _EmptyVectorRepository:
-    """Fallback repository returning no matches until a real backend is wired in."""
-
-    async def search_points(
-        self,
-        *,
-        query_vector: list[float],
-        limit: int,
-        score_threshold: float | None = None,
-    ) -> list[dict[str, Any]]:
-        return []
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Build shared retrieval and generation collaborators once per process."""
+    repository = QdrantRepository(
+        url=settings.qdrant_url,
+        collection_name=settings.qdrant_collection_name,
+    )
+    cache = RedisCache.from_url(settings.redis_url)
+    app.state.retrieval_service = RetrievalService(
+        cache=cache,
+        repository=repository,
+        embedder=lambda text: embed_query(text, model_name=settings.embedding_model_name),
+        score_threshold=settings.retrieval_score_threshold,
+        top_k=settings.retrieval_top_k,
+        cache_ttl_seconds=settings.retrieval_cache_ttl_seconds,
+    )
+    app.state.generation_service = GenerationService(
+        provider=LiteLLMProvider(
+            model=settings.llm_model_name,
+            api_base=settings.llm_api_base,
+            api_key=settings.llm_api_key,
+            temperature=settings.llm_temperature,
+            max_tokens=settings.llm_max_tokens,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_retries=settings.llm_max_retries,
+            retry_backoff_seconds=settings.llm_retry_backoff_seconds,
+        ),
+        temperature=settings.llm_temperature,
+        model=settings.llm_model_name,
+    )
+    try:
+        yield
+    finally:
+        await cache.close()
+        await repository.close()
 
 
 app = FastAPI(
     title="Agentic Paper Explorer Backend",
     description="Retrieval and generation API for grounded paper answers.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -65,28 +81,14 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api/v1", tags=["backend"])
 
 
-async def get_retrieval_service() -> RetrievalService:
-    """Return a retrieval service instance for backend handlers."""
-    return RetrievalService(
-        cache=_MemoryCache(),
-        repository=_EmptyVectorRepository(),
-        embedder=lambda text: [0.1, 0.2, 0.3],
-    )
+def get_retrieval_service(request: Request) -> RetrievalService:
+    """Return the shared retrieval service created at app startup."""
+    return request.app.state.retrieval_service
 
 
-async def get_generation_service() -> GenerationService:
-    """Create a generation service backed by LiteLLM from settings."""
-    provider = LiteLLMProvider(
-        model=settings.llm_model_name,
-        api_base=settings.llm_api_base,
-        api_key=settings.llm_api_key,
-        temperature=settings.llm_temperature,
-        max_tokens=settings.llm_max_tokens,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_retries=settings.llm_max_retries,
-        retry_backoff_seconds=settings.llm_retry_backoff_seconds,
-    )
-    return GenerationService(provider=provider, model=settings.llm_model_name)
+def get_generation_service(request: Request) -> GenerationService:
+    """Return the shared generation service created at app startup."""
+    return request.app.state.generation_service
 
 
 @api_router.post("/generation/answer", response_model=GenerationResponse)

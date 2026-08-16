@@ -52,47 +52,62 @@ def fake_cache() -> FakeCache:
 
 
 def test_qdrant_repository_search_points_returns_matches(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeScoredPoint:
+        def __init__(self, point_id: str, score: float, payload: dict[str, object]) -> None:
+            self.id = point_id
+            self.score = score
+            self.payload = payload
+
+    class FakeQueryResponse:
+        def __init__(self, points: list[FakeScoredPoint]) -> None:
+            self.points = points
+
     class FakeAsyncQdrantClient:
         def __init__(self, *, url: str) -> None:
             self.url = url
             self.search_calls: list[dict[str, object]] = []
 
-        async def search(
+        async def query_points(
             self,
             *,
             collection_name: str,
-            query_vector: list[float],
+            query: list[float],
             limit: int,
             score_threshold: float | None = None,
-        ) -> list[dict[str, object]]:
+            with_payload: bool = True,
+        ) -> FakeQueryResponse:
             self.search_calls.append(
                 {
                     "collection_name": collection_name,
-                    "query_vector": query_vector,
+                    "query": query,
                     "limit": limit,
                     "score_threshold": score_threshold,
                 }
             )
-            return [
-                {
-                    "id": "12345678-1234-4234-8234-123456789abc",
-                    "score": 0.95,
-                    "payload": {"text": "retrieved chunk", "paper_id": "paper-1"},
-                }
-            ]
+            return FakeQueryResponse(
+                [
+                    FakeScoredPoint(
+                        "12345678-1234-4234-8234-123456789abc",
+                        0.95,
+                        {"text": "retrieved chunk", "paper_id": "paper-1"},
+                    )
+                ]
+            )
 
     monkeypatch.setattr(QdrantRepository, "_client", None, raising=False)
     monkeypatch.setattr(QdrantRepository, "_collection_name", "arxiv_papers", raising=False)
 
     repository = QdrantRepository(url="http://localhost:6333", collection_name="arxiv_papers")
-    repository._client = FakeAsyncQdrantClient(url="http://localhost:6333")
+    client = FakeAsyncQdrantClient(url="http://localhost:6333")
+    repository._client = client
 
     hits = asyncio.run(
         repository.search_points(query_vector=[0.1, 0.2, 0.3], limit=5, score_threshold=0.1)
     )
 
+    assert client.search_calls[0]["query"] == [0.1, 0.2, 0.3]
     assert hits[0]["score"] == 0.95
-    assert hits[0]["payload"]["paper_id"] == "paper-1"
+    assert hits[0]["payload"] == {"text": "retrieved chunk", "paper_id": "paper-1"}
 
 
 def test_retrieval_service_uses_cache_when_prompt_is_cached(fake_cache: FakeCache) -> None:
@@ -153,3 +168,30 @@ def test_retrieval_service_falls_back_to_vector_search_and_caches_result(
     assert repo.search_calls
     assert result.chunks[0].paper_id == "paper-2"
     assert fake_cache.set_calls
+
+
+def test_search_awaits_async_embedder(fake_cache: FakeCache) -> None:
+    repo = FakeRepo(
+        [
+            {
+                "id": "point-3",
+                "score": 0.81,
+                "payload": {
+                    "paper_id": "paper-3",
+                    "title": "Async Embedding",
+                    "text": "Embedding runs off the event loop.",
+                    "entry_url": "https://arxiv.org/abs/paper-3",
+                },
+            }
+        ]
+    )
+
+    async def async_embedder(text: str) -> list[float]:
+        return [0.4, 0.5, 0.6]
+
+    service = RetrievalService(cache=fake_cache, repository=repo, embedder=async_embedder)
+
+    result = asyncio.run(service.search("async embedding"))
+
+    assert repo.search_calls[0]["query_vector"] == [0.4, 0.5, 0.6]
+    assert result.chunks[0].paper_id == "paper-3"

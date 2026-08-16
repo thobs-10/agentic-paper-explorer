@@ -30,6 +30,11 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         "LLM_MAX_RETRIES",
         "LLM_RETRY_BACKOFF_SECONDS",
         "BACKEND_API_BASE_URL",
+        "REDIS_URL",
+        "QDRANT_URL",
+        "RETRIEVAL_TOP_K",
+        "RETRIEVAL_SCORE_THRESHOLD",
+        "RETRIEVAL_CACHE_TTL_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -50,6 +55,11 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.llm_timeout_seconds == 30.0
     assert settings.llm_max_retries == 2
     assert settings.llm_retry_backoff_seconds == 0.5
+    assert settings.redis_url == "redis://localhost:6379/0"
+    assert settings.qdrant_url == "http://localhost:6333"
+    assert settings.retrieval_top_k == 5
+    assert settings.retrieval_score_threshold == 0.2
+    assert settings.retrieval_cache_ttl_seconds == 3600
 
 
 def test_settings_parses_comma_separated_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
