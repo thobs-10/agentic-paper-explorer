@@ -84,12 +84,14 @@ class QdrantRepository:
         score_threshold: float | None = None,
     ) -> list[dict[str, object]]:
         """Return the highest-scoring points for a vector query."""
-        matches = await self._client.search(
+        response = await self._client.query_points(
             collection_name=self._collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             score_threshold=score_threshold,
+            with_payload=True,
         )
+        matches = getattr(response, "points", response)
         normalized_matches: list[dict[str, object]] = []
         for match in matches:
             if isinstance(match, dict):

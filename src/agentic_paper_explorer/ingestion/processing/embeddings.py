@@ -38,3 +38,17 @@ async def embed_texts(
         return []
     model = get_embedding_model(model_name)
     return await asyncio.to_thread(model.embed_documents, texts)
+
+
+async def embed_query(text: str, *, model_name: str) -> list[float]:
+    """Embed a single search query using the query-side encoder.
+
+    Args:
+        text: The query text to embed.
+        model_name: The name of the embedding model to use.
+
+    Returns:
+        The query embedding vector.
+    """
+    model = get_embedding_model(model_name)
+    return await asyncio.to_thread(model.embed_query, text)
