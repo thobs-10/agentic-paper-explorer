@@ -76,6 +76,9 @@ async def get_generation_service() -> GenerationService:
         api_key=settings.llm_api_key,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
+        timeout_seconds=settings.llm_timeout_seconds,
+        max_retries=settings.llm_max_retries,
+        retry_backoff_seconds=settings.llm_retry_backoff_seconds,
     )
     return GenerationService(provider=provider, model=settings.llm_model_name)
 

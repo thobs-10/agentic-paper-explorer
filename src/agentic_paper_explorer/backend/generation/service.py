@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
 from agentic_paper_explorer.backend.generation.prompts import DEFAULT_SYSTEM_PROMPT
+from agentic_paper_explorer.backend.generation.provider import ProviderError
 from agentic_paper_explorer.backend.retrieval.service import RetrievedChunk
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderProtocol(Protocol):
@@ -67,11 +71,24 @@ class GenerationService:
     async def answer_question(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
         """Generate an answer from the retrieved paper context."""
         prompt = self.build_prompt(query, chunks)
-        answer_text = await self._provider.generate(
-            prompt=prompt,
-            system_prompt=self._system_prompt,
-            temperature=self._temperature,
-        )
+        try:
+            answer_text = await self._provider.generate(
+                prompt=prompt,
+                system_prompt=self._system_prompt,
+                temperature=self._temperature,
+            )
+        except ProviderError as exc:
+            logger.error("Generation fallback used category=%s", exc.category)
+            answer_text = (
+                "I could not generate an answer right now. Please try again shortly. "
+                "The retrieved paper sources are included below for reference."
+            )
+        except Exception:
+            logger.exception("Generation fallback used for unexpected provider failure")
+            answer_text = (
+                "I could not generate an answer right now. Please try again shortly. "
+                "The retrieved paper sources are included below for reference."
+            )
         sources = [chunk.source_url for chunk in chunks if chunk.source_url]
         return GenerationResult(answer=answer_text, sources=sources, model=self._model)
 

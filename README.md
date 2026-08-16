@@ -231,3 +231,31 @@ uv run ruff check src/agentic_paper_explorer/backend/retrieval/service.py src/ag
 ```
 
 This keeps the retrieval phase testable and isolated while leaving room for the response-generation layer to build on top of the resulting context bundle.
+
+## Phase 3 - Reliable response generation
+
+Phase 3 adds grounded response generation through the LiteLLM gateway. The application uses the configured lightweight open-source model and keeps provider-specific calls behind [provider.py](src/agentic_paper_explorer/backend/generation/provider.py).
+
+### Generation failure behavior
+
+- Each provider call has a bounded timeout controlled by `LITELLM_TIMEOUT_SECONDS` (default 30 seconds).
+- Rate limits (`429`), upstream server failures (`5xx`), timeouts, and network failures are retried with exponential backoff. The defaults are two retries and a 0.5 second initial delay.
+- Non-transient provider errors, such as invalid requests, are not retried.
+- Provider exceptions are mapped to stable categories (`rate_limit`, `upstream`, `timeout`, `network`, or `provider`) and detailed provider messages are kept out of the API response.
+- When all attempts fail, the generation service returns a concise fallback message and preserves the retrieved paper source links so the client still has traceable context.
+- Provider attempts and failure categories are emitted through the module logger for operational tracing.
+
+The policy is configured with:
+
+```text
+LITELLM_TIMEOUT_SECONDS=30.0
+LITELLM_MAX_RETRIES=2
+LITELLM_RETRY_BACKOFF_SECONDS=0.5
+```
+
+### Verification
+
+```bash
+uv run pytest tests/backend/generation tests/configs/test_settings.py -q
+uv run ruff check src/agentic_paper_explorer/backend/generation src/agentic_paper_explorer/configs/settings.py tests/backend/generation tests/configs/test_settings.py
+```

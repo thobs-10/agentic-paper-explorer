@@ -23,6 +23,12 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         "LLM_MODEL_NAME",
         "LLM_TEMPERATURE",
         "LLM_MAX_TOKENS",
+        "LITELLM_TIMEOUT_SECONDS",
+        "LITELLM_MAX_RETRIES",
+        "LITELLM_RETRY_BACKOFF_SECONDS",
+        "LLM_TIMEOUT_SECONDS",
+        "LLM_MAX_RETRIES",
+        "LLM_RETRY_BACKOFF_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -39,6 +45,9 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
     assert settings.llm_temperature == 0.2
     assert settings.llm_max_tokens == 512
+    assert settings.llm_timeout_seconds == 30.0
+    assert settings.llm_max_retries == 2
+    assert settings.llm_retry_backoff_seconds == 0.5
 
 
 def test_settings_parses_comma_separated_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -55,6 +64,9 @@ def test_settings_reads_litellm_env_aliases(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("LITELLM_MODEL_NAME", "openrouter/meta-llama/llama-3.2-3b-instruct:free")
     monkeypatch.setenv("LITELLM_TEMPERATURE", "0.5")
     monkeypatch.setenv("LITELLM_MAX_TOKENS", "1024")
+    monkeypatch.setenv("LITELLM_TIMEOUT_SECONDS", "45")
+    monkeypatch.setenv("LITELLM_MAX_RETRIES", "4")
+    monkeypatch.setenv("LITELLM_RETRY_BACKOFF_SECONDS", "1.25")
 
     settings = Settings(_env_file=None)
 
@@ -63,6 +75,9 @@ def test_settings_reads_litellm_env_aliases(monkeypatch: pytest.MonkeyPatch) -> 
     assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
     assert settings.llm_temperature == 0.5
     assert settings.llm_max_tokens == 1024
+    assert settings.llm_timeout_seconds == 45.0
+    assert settings.llm_max_retries == 4
+    assert settings.llm_retry_backoff_seconds == 1.25
 
 
 def test_settings_accepts_list_value_for_allowed_origins() -> None:
