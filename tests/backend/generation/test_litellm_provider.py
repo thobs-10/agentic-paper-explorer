@@ -25,7 +25,7 @@ def test_litellm_provider_calls_model_with_prompt(monkeypatch):
     from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider
 
     provider = LiteLLMProvider(
-        model="openai/gpt-4o-mini",
+        model="openrouter/meta-llama/llama-3.2-3b-instruct:free",
         api_base="http://localhost:4000",
         api_key="test-key",
         temperature=0.3,
