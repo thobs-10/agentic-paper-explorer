@@ -64,7 +64,7 @@ class GenerationService:
             " source references when they are relevant."
         )
 
-    async def generate(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
+    async def answer_question(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
         """Generate an answer from the retrieved paper context."""
         prompt = self.build_prompt(query, chunks)
         answer_text = await self._provider.generate(
@@ -74,3 +74,7 @@ class GenerationService:
         )
         sources = [chunk.source_url for chunk in chunks if chunk.source_url]
         return GenerationResult(answer=answer_text, sources=sources, model=self._model)
+
+    async def generate(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:
+        """Backward-compatible alias for the generation flow."""
+        return await self.answer_question(query, chunks)
