@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterable, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,87 @@ class LiteLLMProvider:
             return ""
         content = getattr(message, "content", "")
         return str(content or "")
+
+    async def generate_stream(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
+        """Yield model text deltas from a LiteLLM streaming completion."""
+        try:
+            import litellm
+        except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
+            raise RuntimeError(
+                "LiteLLM is not installed. Add it to the project dependencies."
+            ) from exc
+
+        request_kwargs = {
+            "model": self._model,
+            "api_base": self._api_base,
+            "api_key": self._api_key,
+            "messages": [
+                {"role": "system", "content": system_prompt or "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": temperature if temperature is not None else self._temperature,
+            "max_tokens": self._max_tokens,
+            "stream": True,
+        }
+
+        for attempt in range(self._max_retries + 1):
+            emitted = False
+            try:
+                logger.info(
+                    "Starting LiteLLM streaming model=%s attempt=%d",
+                    self._model,
+                    attempt + 1,
+                )
+                response = await asyncio.wait_for(
+                    litellm.acompletion(**request_kwargs), timeout=self._timeout_seconds
+                )
+                async for chunk in _iter_with_timeout(response, self._timeout_seconds):
+                    delta = _extract_stream_delta(chunk)
+                    if delta:
+                        emitted = True
+                        yield delta
+                return
+            except Exception as exc:
+                error = _classify_provider_error(exc)
+                logger.warning(
+                    "LiteLLM streaming failed model=%s attempt=%d category=%s retryable=%s",
+                    self._model,
+                    attempt + 1,
+                    error.category,
+                    error.retryable,
+                )
+                if emitted or not error.retryable or attempt >= self._max_retries:
+                    raise error from exc
+                await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
+
+
+async def _iter_with_timeout(
+    response: AsyncIterable[object], timeout_seconds: float
+) -> AsyncIterator[object]:
+    """Iterate over a provider stream while bounding each chunk wait."""
+    iterator = response.__aiter__()
+    while True:
+        try:
+            yield await asyncio.wait_for(iterator.__anext__(), timeout=timeout_seconds)
+        except StopAsyncIteration:
+            return
+
+
+def _extract_stream_delta(chunk: object) -> str:
+    """Extract text from common LiteLLM/OpenAI streaming chunk shapes."""
+    choices = getattr(chunk, "choices", [])
+    if not choices:
+        return ""
+    choice = choices[0]
+    delta = getattr(choice, "delta", None)
+    content = getattr(delta, "content", "") if delta is not None else ""
+    return str(content or "")
 
 
 def _classify_provider_error(exc: Exception) -> ProviderError:
