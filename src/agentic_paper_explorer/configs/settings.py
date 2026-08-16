@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection_name: str = "arxiv_papers"
 
+    # Frontend settings
+    backend_api_base_url: str = Field(
+        default="http://localhost:8000",
+        validation_alias=AliasChoices("BACKEND_API_BASE_URL", "backend_api_base_url"),
+    )
+
     # Embedding settings
     embedding_model_name: str = "BAAI/bge-small-en-v1.5"
 
