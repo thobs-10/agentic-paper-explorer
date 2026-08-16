@@ -1,4 +1,4 @@
-.PHONY: infra-config infra-up infra-down infra-logs infra-ps
+.PHONY: infra-config infra-up infra-down infra-logs infra-ps ui
 
 infra-config:
 	docker compose config
@@ -14,3 +14,6 @@ infra-logs:
 
 infra-ps:
 	docker compose ps
+
+ui:
+	uv run streamlit run src/agentic_paper_explorer/frontend/app.py
