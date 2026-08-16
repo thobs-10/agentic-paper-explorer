@@ -3,6 +3,7 @@
 import asyncio
 
 from agentic_paper_explorer.backend.generation.prompts import DEFAULT_SYSTEM_PROMPT
+from agentic_paper_explorer.backend.generation.provider import ProviderError
 from agentic_paper_explorer.backend.generation.service import GenerationResult, GenerationService
 from agentic_paper_explorer.backend.retrieval.service import RetrievedChunk
 
@@ -26,6 +27,17 @@ class FakeProvider:
             }
         )
         return "This paper explains retrieval in a modern RAG pipeline."
+
+
+class FailingProvider:
+    async def generate(
+        self,
+        *,
+        prompt: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.2,
+    ) -> str:
+        raise ProviderError("rate limited", category="rate_limit", retryable=True)
 
 
 def test_generation_service_uses_detailed_default_system_prompt() -> None:
@@ -74,3 +86,22 @@ def test_generation_service_returns_structured_answer() -> None:
     assert result.answer.startswith("This paper")
     assert result.sources == ["https://arxiv.org/abs/paper-2"]
     assert provider.calls
+
+
+def test_generation_service_returns_fallback_when_provider_fails() -> None:
+    service = GenerationService(provider=FailingProvider(), model="test-model")
+    chunks = [
+        RetrievedChunk(
+            paper_id="paper-3",
+            title="Reliable Generation",
+            text="Generation can fail transiently.",
+            score=0.8,
+            source_url="https://arxiv.org/abs/paper-3",
+        )
+    ]
+
+    result = asyncio.run(service.answer_question("What can fail?", chunks))
+
+    assert result.answer.startswith("I could not generate an answer")
+    assert result.sources == ["https://arxiv.org/abs/paper-3"]
+    assert result.model == "test-model"
