@@ -58,7 +58,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LITELLM_API_KEY", "LLM_API_KEY", "llm_api_key"),
     )
     llm_model_name: str = Field(
-        default="openrouter/meta-llama/llama-3.2-3b-instruct:free",
+        default="openrouter/google/gemma-4-26b-a4b-it:free",
         validation_alias=AliasChoices("LITELLM_MODEL_NAME", "LLM_MODEL_NAME", "llm_model_name"),
     )
     llm_temperature: float = Field(
