@@ -1,0 +1,104 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "setuptools_scm>=8.2.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-paper-explorer"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["python-dotenv>=1.2.2", "pydantic-settings>=2.13.1"]
+
+# Each service installs only the extra it needs so container images stay small.
+[project.optional-dependencies]
+backend = [
+    "fastapi[standard]>=0.141.1",
+    "qdrant-client>=1.12.0",
+    "redis>=8.1.0",
+    "litellm>=1.96.2",
+    "langchain-huggingface>=0.1.2",
+    "sentence-transformers>=3.3.1",
+    "prometheus-client>=0.21.0",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    # torch>=2.13 drops macOS 13 wheels; pin to the last compatible release.
+    "torch<2.12",
+]
+ingestion = [
+    "fastapi[standard]>=0.141.1",
+    "qdrant-client>=1.12.0",
+    "defusedxml>=0.7.1",
+    "langchain-huggingface>=0.1.2",
+    "sentence-transformers>=3.3.1",
+    "torch<2.12",
+]
+frontend = ["streamlit>=1.61.1", "httpx>=0.28"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["agentic_paper_explorer*"]
+
+# Linux wheels of torch bundle the CUDA runtime, which adds gigabytes to a
+# CPU-only container image. macOS keeps the default PyPI wheels.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[dependency-groups]
+dev = [
+    # Tests exercise every service, so pull in all runtime extras locally.
+    "agentic-paper-explorer[backend,ingestion,frontend]",
+    "pre-commit>=4.6.1",
+    "pytest-cov>=7.1.0",
+    "pytest-instafail>=0.5.0",
+    "pytest-mock>=3.15.1",
+    "pytest-randomly>=4.1.0",
+    "pytest-xdist>=3.8.0",
+    "ruff>=0.14.0",
+]
+
+# ---------------------------------------------------
+# Ruff (linting + formatting)
+# ---------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "C90", "I"] # I = isort import sorting
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"] # example: allow asserts in tests
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------
+# pytest
+# ---------------------------------------------------
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-ra -q --cov=src --cov-report=term-missing"
+markers = ["slow: marks tests as slow", "integration: marks integration tests"]
+
+# ---------------------------------------------------
+# coverage.py (used by pytest-cov)
+# ---------------------------------------------------
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]

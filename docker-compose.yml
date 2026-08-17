@@ -1,0 +1,236 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.3
+    container_name: agentic-paper-explorer-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      # qdrant's image ships neither wget nor curl; probe the port with bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: agentic-paper-explorer-redis
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--save",
+        "60",
+        "1",
+        "--loglevel",
+        "warning",
+      ]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: agentic-paper-explorer-litellm
+    restart: unless-stopped
+    ports:
+      - "${LITELLM_PORT:-4000}:4000"
+    environment:
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:-sk-1234}"
+      LITELLM_SITENAME: "agentic-paper-explorer"
+      LITELLM_LOG_LEVEL: "INFO"
+      LITELLM_PORT: "4000"
+      DATABASE_URL: "postgresql://litellm:${POSTGRES_PASSWORD:-litellm}@litellm-db:5432/litellm"
+    command:
+      [
+        "--port",
+        "4000",
+        "--model",
+        "openrouter/google/gemma-4-26b-a4b-it:free",
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/4000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+
+  litellm-db:
+    image: postgres:16
+    container_name: agentic-paper-explorer-litellm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-litellm}"
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  backend:
+    build:
+      context: .
+      target: backend
+    container_name: agentic-paper-explorer-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION_NAME: "${QDRANT_COLLECTION_NAME:-arxiv_papers}"
+      REDIS_URL: "redis://redis:6379/0"
+      LITELLM_API_BASE: "http://litellm:4000"
+      LITELLM_API_KEY: "${LITELLM_MASTER_KEY:-sk-1234}"
+      # The litellm_proxy/ prefix routes the call through the proxy container
+      # rather than straight to the upstream provider.
+      LITELLM_MODEL_NAME: "${BACKEND_MODEL_NAME:-litellm_proxy/openrouter/google/gemma-4-26b-a4b-it:free}"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+    volumes:
+      - hf_cache:/home/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ingestion:
+    build:
+      context: .
+      target: ingestion
+    container_name: agentic-paper-explorer-ingestion
+    restart: unless-stopped
+    ports:
+      - "${INGESTION_PORT:-8001}:8001"
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION_NAME: "${QDRANT_COLLECTION_NAME:-arxiv_papers}"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
+      ARXIV_BASE_URL: "${ARXIV_BASE_URL:-https://export.arxiv.org/api/query}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+    volumes:
+      - hf_cache:/home/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # volumes:
+  #   redis_data:
+  #   hf_cache:
+  #   litellm_pg_data:
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: agentic-paper-explorer-prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./src/agentic_paper_explorer/monitoring/configs/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=15d"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  grafana:
+    image: grafana/grafana-oss:11.5.1
+    container_name: agentic-paper-explorer-grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    volumes:
+      - ./src/agentic_paper_explorer/monitoring/configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./src/agentic_paper_explorer/monitoring/configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    container_name: agentic-paper-explorer-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    environment:
+      BACKEND_API_BASE_URL: "http://backend:8000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  qdrant_data:
+  redis_data:
+  litellm_pg_data:
+  hf_cache:
+  prometheus_data:
+  grafana_data:
