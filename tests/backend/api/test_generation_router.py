@@ -114,6 +114,42 @@ def test_generation_stream_route_returns_sse_events() -> None:
     )
 
 
+def test_generation_route_returns_502_with_sources_when_generation_is_degraded() -> None:
+    class DegradedGenerationService(StubGenerationService):
+        async def answer_question(
+            self, query: str, chunks: list[RetrievedChunk]
+        ) -> GenerationResult:
+            return GenerationResult(
+                answer="I could not generate an answer right now.",
+                sources=["https://arxiv.org/abs/paper-1"],
+                model="stub-model",
+                degraded=True,
+                error_category="rate_limit",
+            )
+
+    from agentic_paper_explorer.backend.api.router import (
+        get_generation_service,
+        get_retrieval_service,
+    )
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_retrieval_service] = lambda: StubRetrievalService()
+    app.dependency_overrides[get_generation_service] = lambda: DegradedGenerationService()
+
+    response = TestClient(app).post(
+        "/api/v1/generation/answer",
+        json={"query": "What is retrieval?"},
+    )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 502
+    payload = response.json()
+    assert payload["degraded"] is True
+    assert payload["error_category"] == "rate_limit"
+    assert payload["sources"] == ["https://arxiv.org/abs/paper-1"]
+
+
 def test_lifespan_wires_qdrant_and_redis_collaborators(monkeypatch: pytest.MonkeyPatch) -> None:
     created: dict[str, str] = {}
     closed_caches: list["FakeCache"] = []
@@ -161,3 +197,11 @@ def test_lifespan_wires_qdrant_and_redis_collaborators(monkeypatch: pytest.Monke
     assert created["qdrant_url"] == router_module.settings.qdrant_url
     assert created["redis_url"] == router_module.settings.redis_url
     assert closed_caches[0].closed is True
+
+
+def test_health_endpoint_reports_backend_service() -> None:
+    app.dependency_overrides.clear()
+    response = TestClient(app).get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "service": "backend"}
