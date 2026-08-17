@@ -55,21 +55,138 @@ services:
       LITELLM_SITENAME: "agentic-paper-explorer"
       LITELLM_LOG_LEVEL: "INFO"
       LITELLM_PORT: "4000"
+      DATABASE_URL: "postgresql://litellm:${POSTGRES_PASSWORD:-litellm}@litellm-db:5432/litellm"
     command:
       [
         "--port",
         "4000",
         "--model",
-        "openrouter/meta-llama/llama-3.2-3b-instruct:free",
+        "openrouter/google/gemma-4-26b-a4b-it:free",
       ]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/4000'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      litellm-db:
+        condition: service_healthy
+
+  litellm-db:
+    image: postgres:16
+    container_name: agentic-paper-explorer-litellm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-litellm}"
+      POSTGRES_DB: litellm
+    volumes:
+      - litellm_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+  backend:
+    build:
+      context: .
+      target: backend
+    container_name: agentic-paper-explorer-backend
+    restart: unless-stopped
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION_NAME: "${QDRANT_COLLECTION_NAME:-arxiv_papers}"
+      REDIS_URL: "redis://redis:6379/0"
+      LITELLM_API_BASE: "http://litellm:4000"
+      LITELLM_API_KEY: "${LITELLM_MASTER_KEY:-sk-1234}"
+      # The litellm_proxy/ prefix routes the call through the proxy container
+      # rather than straight to the upstream provider.
+      LITELLM_MODEL_NAME: "${BACKEND_MODEL_NAME:-litellm_proxy/openrouter/google/gemma-4-26b-a4b-it:free}"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+    volumes:
+      - hf_cache:/home/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      litellm:
+        condition: service_healthy
     healthcheck:
       test:
         [
           "CMD",
-          "wget",
-          "--spider",
-          "-q",
-          "http://localhost:4000/health/readiness",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ingestion:
+    build:
+      context: .
+      target: ingestion
+    container_name: agentic-paper-explorer-ingestion
+    restart: unless-stopped
+    ports:
+      - "${INGESTION_PORT:-8001}:8001"
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION_NAME: "${QDRANT_COLLECTION_NAME:-arxiv_papers}"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
+      ARXIV_BASE_URL: "${ARXIV_BASE_URL:-https://export.arxiv.org/api/query}"
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+    volumes:
+      - hf_cache:/home/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # volumes:
+  #   redis_data:
+  #   hf_cache:
+  #   litellm_pg_data:
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    container_name: agentic-paper-explorer-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
+    environment:
+      BACKEND_API_BASE_URL: "http://backend:8000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')",
         ]
       interval: 10s
       timeout: 5s
@@ -79,3 +196,5 @@ services:
 volumes:
   qdrant_data:
   redis_data:
+  litellm_pg_data:
+  hf_cache:
