@@ -49,7 +49,7 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.backend_api_base_url == "http://localhost:8000"
     assert settings.llm_api_base == "http://localhost:4000"
     assert settings.llm_api_key == ""
-    assert settings.llm_model_name == "openrouter/meta-llama/llama-3.2-3b-instruct:free"
+    assert settings.llm_model_name == "openrouter/google/gemma-4-26b-a4b-it:free"
     assert settings.llm_temperature == 0.2
     assert settings.llm_max_tokens == 512
     assert settings.llm_timeout_seconds == 30.0
