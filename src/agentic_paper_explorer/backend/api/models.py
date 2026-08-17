@@ -18,3 +18,9 @@ class GenerationResponse(BaseModel):
     answer: str
     sources: list[str] = Field(default_factory=list)
     model: str | None = None
+    degraded: bool = Field(
+        default=False, description="True when the answer text is a fallback, not model output"
+    )
+    error_category: str | None = Field(
+        default=None, description="Normalized provider failure category when degraded"
+    )

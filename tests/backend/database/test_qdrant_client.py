@@ -136,5 +136,6 @@ def test_repository_upserts_points_to_running_qdrant_container() -> None:
         count_result = asyncio.run(client.count(collection_name=collection_name))
         assert count_result.count == 1
     finally:
+        asyncio.run(client.delete_collection(collection_name=collection_name))
         asyncio.run(repository.close())
         asyncio.run(client.close())

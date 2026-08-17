@@ -6,9 +6,9 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from agentic_paper_explorer.backend.api.models import GenerationRequest, GenerationResponse
 from agentic_paper_explorer.backend.database.qdrant_client import QdrantRepository
@@ -91,24 +91,39 @@ def get_generation_service(request: Request) -> GenerationService:
     return request.app.state.generation_service
 
 
+@app.get("/health", tags=["health"])
+async def health() -> dict[str, str]:
+    """Report process liveness for container health checks."""
+    return {"status": "ok", "service": "backend"}
+
+
 @api_router.post("/generation/answer", response_model=GenerationResponse)
 async def answer_question(
     request: GenerationRequest,
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
     generation_service: GenerationService = Depends(get_generation_service),
-) -> GenerationResponse:
+) -> GenerationResponse | JSONResponse:
     """Retrieve relevant paper context and answer the user's question grounded in it."""
     retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
     generation_result: GenerationResult = await generation_service.answer_question(
         request.query,
         retrieval_result.chunks,
     )
-    return GenerationResponse(
+    response = GenerationResponse(
         query=request.query,
         answer=generation_result.answer,
         sources=generation_result.sources,
         model=generation_result.model,
+        degraded=generation_result.degraded,
+        error_category=generation_result.error_category,
     )
+    if generation_result.degraded:
+        # Signal upstream failure with the status code while still returning retrieved sources.
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=response.model_dump(),
+        )
+    return response
 
 
 @api_router.post("/generation/answer/stream")

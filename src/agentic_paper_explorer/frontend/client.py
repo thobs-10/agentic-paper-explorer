@@ -22,6 +22,8 @@ class GenerationResponse:
     answer: str
     sources: list[str]
     model: str | None
+    degraded: bool = False
+    error_category: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +49,9 @@ class GenerationClient:
                 json={"query": query},
                 timeout=self._timeout,
             )
-            response.raise_for_status()
+            # A degraded answer still carries the retrieved sources, so keep the body.
+            if response.status_code != httpx.codes.BAD_GATEWAY:
+                response.raise_for_status()
             payload = response.json()
         except (httpx.HTTPError, ValueError) as exc:
             raise GenerationClientError("The generation service could not be reached.") from exc
@@ -77,6 +81,10 @@ def _parse_response(payload: object) -> GenerationResponse:
             answer=str(payload["answer"]),
             sources=[str(source) for source in payload.get("sources", [])],
             model=str(payload["model"]) if payload.get("model") is not None else None,
+            degraded=bool(payload.get("degraded", False)),
+            error_category=(
+                str(payload["error_category"]) if payload.get("error_category") else None
+            ),
         )
     except (KeyError, TypeError) as exc:
         raise GenerationClientError("The generation service returned an invalid response.") from exc

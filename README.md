@@ -3,32 +3,40 @@ Agentic RAG application that interacts with arXiv to fetch papers based on the u
 
 ## Local infrastructure
 
-Phase 0 infrastructure is defined in [docker-compose.yml](/Users/thobelasixpence/Documents/portfolio-projects/agentic-paper-explorer/docker-compose.yml).
+The full stack is defined in [docker-compose.yml](docker-compose.yml) and built from the multi-stage [Dockerfile](Dockerfile).
 
-Services:
-- Qdrant HTTP on `localhost:6333`
-- Qdrant gRPC on `localhost:6334`
-- Redis on `localhost:6379`
+| Service | Port | Role |
+| --- | --- | --- |
+| `frontend` | 8501 | Streamlit UI |
+| `backend` | 8000 | Retrieval + generation API |
+| `ingestion` | 8001 | arXiv ingestion API |
+| `litellm` | 4000 | Model gateway |
+| `litellm-db` | internal | LiteLLM metadata store |
+| `qdrant` | 6333 / 6334 | Vector database (HTTP / gRPC) |
+| `redis` | 6379 | Retrieval cache |
 
-Start the local services with:
+Start everything with:
 
 ```bash
+cp .env.example .env   # then set OPENROUTER_API_KEY
 docker compose up -d
 ```
 
-Default local connection settings are listed in [.env.example](/Users/thobelasixpence/Documents/portfolio-projects/agentic-paper-explorer/.env.example).
+Default local connection settings are listed in [.env.example](.env.example).
 
-Convenience targets are in [Makefile](/Users/thobelasixpence/Documents/portfolio-projects/agentic-paper-explorer/Makefile):
+Convenience targets are in [Makefile](Makefile):
 
 ```bash
 make infra-config   # validate the compose file
-make infra-up       # start qdrant and redis
-make infra-ps       # show service status
-make infra-logs     # tail service logs
-make infra-down     # stop and remove services
+make infra-up       # start qdrant, redis, litellm only
+make build          # build backend, ingestion, frontend images
+make up             # start the whole stack
+make ps             # show service status
+make logs           # tail application logs
+make down           # stop and remove services
 ```
 
-Both services declare health checks, so `docker compose ps` reports readiness rather than just container liveness. Data is persisted in the `qdrant_data` and `redis_data` named volumes.
+Every service declares a health check, so `docker compose ps` reports readiness rather than just container liveness. Dependencies use `condition: service_healthy`, so the backend does not start before Qdrant, Redis, and the model gateway are actually accepting connections. Data persists in the `qdrant_data`, `redis_data`, `litellm_pg_data`, and `hf_cache` named volumes; `hf_cache` is shared between the backend and ingestion containers so the embedding model is downloaded once.
 
 ## Phase 0 - DB configuration and arXiv ingestion API
 
@@ -241,8 +249,8 @@ Phase 3 adds grounded response generation through the LiteLLM gateway. The appli
 - Each provider call has a bounded timeout controlled by `LITELLM_TIMEOUT_SECONDS` (default 30 seconds).
 - Rate limits (`429`), upstream server failures (`5xx`), timeouts, and network failures are retried with exponential backoff. The defaults are two retries and a 0.5 second initial delay.
 - Non-transient provider errors, such as invalid requests, are not retried.
-- Provider exceptions are mapped to stable categories (`rate_limit`, `upstream`, `timeout`, `network`, or `provider`) and detailed provider messages are kept out of the API response.
-- When all attempts fail, the generation service returns a concise fallback message and preserves the retrieved paper source links so the client still has traceable context.
+- Provider exceptions are mapped to stable categories (`rate_limit`, `upstream`, `timeout`, `network`, `empty_response`, or `provider`) and detailed provider messages are kept out of the API response.
+- When all attempts fail, the generation service returns a concise fallback message and preserves the retrieved paper source links so the client still has traceable context. Since Phase 5 the response is also flagged `degraded` and returned with HTTP 502.
 - Provider attempts and failure categories are emitted through the module logger for operational tracing.
 
 The policy is configured with:
@@ -322,9 +330,9 @@ data: {"sources":["https://arxiv.org/abs/example"],"model":"..."}
 
 - `start` identifies the query.
 - `chunk` contains a partial text delta and may occur many times. Clients should append `text` values in order.
-- `complete` is the terminal event and contains the unique source URLs and model name.
+- `complete` is the terminal event and contains the unique source URLs and model name, plus `degraded` and `error_category` since Phase 5.
 - If retrieval has no usable context, the stream emits the deterministic abstention message as one `chunk`, followed by `complete`, without calling the provider.
-- If the provider fails after retries, the stream emits a user-safe fallback `chunk` and still terminates with `complete`. Clients can continue displaying already received partial output.
+- If the provider fails after retries, the stream emits an `error` event carrying the failure category and still terminates with `complete`. Clients can continue displaying already received partial output.
 
 For clients that do not support SSE, use `POST /api/v1/generation/answer`, which returns the complete `GenerationResponse` JSON contract.
 
@@ -352,3 +360,123 @@ BACKEND_API_BASE_URL=http://localhost:8000
 ```
 
 The UI streams answer chunks by default, displays the final sources and model metadata, warns when a stream ends after partial output, and falls back to the complete JSON endpoint when streaming cannot start. Insufficient retrieval context is shown as a normal abstention state rather than a transport error.
+
+## Phase 5 - Containerization and end-to-end validation
+
+Phase 5 packages every component as a container, runs the first real end-to-end query through the whole system, and closes the failure-visibility gaps that end-to-end testing exposed.
+
+### What was built
+
+| Concern | Location |
+| --- | --- |
+| Multi-stage build for all services | [Dockerfile](Dockerfile) |
+| Service topology, health checks, volumes | [docker-compose.yml](docker-compose.yml) |
+| Build context exclusions | [.dockerignore](.dockerignore) |
+| Container and local run targets | [Makefile](Makefile) |
+| Liveness endpoints | [backend router](src/agentic_paper_explorer/backend/api/router.py), [ingestion router](src/agentic_paper_explorer/ingestion/api/router.py) |
+| Degraded-response contract | [models.py](src/agentic_paper_explorer/backend/api/models.py), [service.py](src/agentic_paper_explorer/backend/generation/service.py) |
+| Empty-response guard | [provider.py](src/agentic_paper_explorer/backend/generation/provider.py) |
+
+### Image layout
+
+The Dockerfile uses one shared runtime base and three service targets (`backend`, `ingestion`, `frontend`). Dependency layers are resolved per service with `uv sync --extra <service>`, so the frontend image does not carry the embedding or vector-store stack. Only lock metadata is copied before dependency resolution, which keeps dependency layers cached when application source changes. All services run as a non-root `app` user, and the Hugging Face cache directory is created and owned in the image so the named volume mount does not end up root-owned.
+
+Application source is baked in with `COPY src ./src` and is not bind-mounted, which has an operational consequence worth knowing:
+
+| Change | Action required |
+| --- | --- |
+| Provider API key | recreate `litellm` only |
+| Model slug or other env var | recreate `litellm` and `backend` |
+| Python source | **rebuild** the affected image (`docker compose up -d --build backend`) |
+
+### Request flow
+
+An end-to-end request moves through the system as follows. Ingestion is a separate service and is not triggered by a query; the backend answers from whatever is already stored in Qdrant.
+
+```text
+Streamlit UI
+  -> POST /api/v1/generation/answer
+     -> Redis lookup (key: prompt:<normalized-slug>)
+        -> on miss: embed query -> Qdrant top-k search -> cache the ranked chunks
+     -> GenerationService builds the citation-aware prompt
+        -> LiteLLM gateway -> model provider
+  <- answer + sources + model + degraded flag
+```
+
+### Failure visibility
+
+End-to-end testing showed that a misconfigured model gateway returned `HTTP 200` with a friendly fallback sentence, which made an operator-level outage look like a normal answer. Generation failures are now explicit:
+
+- `GenerationResult` and `GenerationResponse` carry `degraded: bool` and `error_category: str | None`.
+- The JSON endpoint returns **HTTP 502** when generation is degraded, while still returning the retrieved `sources` so the client can show traceable context.
+- The streaming endpoint emits a dedicated `error` event with the failure category, then terminates with `complete` carrying `degraded` and `error_category`.
+- Retrieval abstention is *not* treated as degraded. Missing evidence is a valid answer; a broken provider is not.
+
+Example degraded response:
+
+```json
+{
+  "query": "What are transformer models used for in NLP?",
+  "answer": "I could not generate an answer right now. Please try again shortly. ...",
+  "sources": ["https://arxiv.org/abs/2311.17633v2", "..."],
+  "model": "litellm_proxy/openrouter/google/gemma-4-26b-a4b-it:free",
+  "degraded": true,
+  "error_category": "upstream"
+}
+```
+
+### Empty model responses
+
+Reasoning-oriented models return their text in a separate `reasoning` field and leave `message.content` empty. Reading only `content` would have produced blank answers with `HTTP 200`, which is the same class of silent failure as above. The provider now raises `ProviderError(category="empty_response", retryable=False)` when a completion or a stream yields no usable content, so it flows into the degraded path. `_classify_provider_error` also passes existing `ProviderError` instances through unchanged, so the category is not lost when the error is raised inside the retry block.
+
+The default model is `openrouter/google/gemma-4-26b-a4b-it:free`, which returns standard message content. When changing models, verify the candidate populates `message.content` rather than only `reasoning`.
+
+### Verification
+
+```bash
+docker compose up -d
+docker compose ps                      # every service should report (healthy)
+
+# non-streaming
+curl -s -X POST http://localhost:8000/api/v1/generation/answer \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"What are transformer models used for in NLP?"}' | python3 -m json.tool
+
+# streaming
+curl -s -N -X POST http://localhost:8000/api/v1/generation/answer/stream \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"What is attention in neural networks?"}'
+
+# degraded path
+docker compose stop litellm && curl -s -o /dev/null -w '%{http_code}\n' \
+  -X POST http://localhost:8000/api/v1/generation/answer \
+  -H 'Content-Type: application/json' -d '{"query":"anything"}'   # expect 502
+docker compose start litellm
+```
+
+Observed on a corpus of 4192 chunks: cold request `HTTP 200` in ~20s returning a cited answer with 5 sources, streaming delivering token-level deltas, and `HTTP 502` with `error_category: "upstream"` when the gateway is stopped.
+
+Full suite:
+
+```bash
+uv run pytest tests -q
+uv run ruff check src tests
+uv run ruff format --check src tests
+```
+
+### Operational notes
+
+- **Redis caches retrieval, not answers.** A repeated query still calls the model; only the embedding and vector search are skipped. Answer caching is a separate decision.
+- **The corpus must be populated first.** A query against an empty collection returns the abstention message, not an error. Load data with `POST /api/v1/ingestion/papers/process` on port 8001.
+- **Integration tests create and drop their own Qdrant collections.** Interrupted runs can leave `integration-test-*` collections behind; delete them directly if they accumulate.
+
+### Known follow-ups
+
+- no metrics, traces, or dashboards yet, so latency and failure categories are only visible in container logs
+- `degraded` and `error_category` are returned to clients but not yet exported as monitoring signals
+- Qdrant client and server versions differ enough to emit a compatibility warning and should be pinned
+- answer-level caching and a hybrid retrieval pass remain open from earlier phases
+
+## Next phase - Monitoring and observability
+
+The system is now fully containerized and verified end to end, which makes it a sound base for instrumentation. The next phase adds OpenTelemetry instrumentation and Grafana dashboards under [monitoring](src/agentic_paper_explorer/monitoring), with the failure categories introduced in Phase 5 (`rate_limit`, `upstream`, `timeout`, `network`, `empty_response`, `provider`, `internal`) as the first metrics worth tracking, alongside retrieval cache hit rate, end-to-end latency, and per-stage timings.

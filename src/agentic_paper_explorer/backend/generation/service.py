@@ -37,6 +37,14 @@ class ProviderProtocol(Protocol):
     ) -> AsyncIterator[str]: ...
 
 
+GENERATION_FAILURE_MESSAGE = (
+    "I could not generate an answer right now. Please try again shortly. "
+    "The retrieved paper sources are included below for reference."
+)
+
+STREAM_FAILURE_MESSAGE = "I could not complete the answer. Please try again shortly."
+
+
 @dataclass(slots=True)
 class GenerationResult:
     """Structured answer returned by the generation service."""
@@ -44,6 +52,8 @@ class GenerationResult:
     answer: str
     sources: list[str] = field(default_factory=list)
     model: str | None = None
+    degraded: bool = False
+    error_category: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -121,6 +131,7 @@ class GenerationService:
             )
 
         prompt = self.build_prompt(query, chunks)
+        error_category: str | None = None
         try:
             answer_text = await self._provider.generate(
                 prompt=prompt,
@@ -128,21 +139,19 @@ class GenerationService:
                 temperature=self._temperature,
             )
         except ProviderError as exc:
-            logger.error("Generation fallback used category=%s", exc.category)
-            answer_text = (
-                "I could not generate an answer right now. Please try again shortly. "
-                "The retrieved paper sources are included below for reference."
-            )
+            logger.error("Generation failed category=%s retryable=%s", exc.category, exc.retryable)
+            answer_text = GENERATION_FAILURE_MESSAGE
+            error_category = exc.category
         except Exception:
-            logger.exception("Generation fallback used for unexpected provider failure")
-            answer_text = (
-                "I could not generate an answer right now. Please try again shortly. "
-                "The retrieved paper sources are included below for reference."
-            )
+            logger.exception("Generation failed with an unexpected provider error")
+            answer_text = GENERATION_FAILURE_MESSAGE
+            error_category = "internal"
         return GenerationResult(
             answer=answer_text,
             sources=self._source_urls(ordered_chunks),
             model=self._model,
+            degraded=error_category is not None,
+            error_category=error_category,
         )
 
     async def stream_answer(
@@ -160,6 +169,7 @@ class GenerationService:
             return
 
         prompt = self.build_prompt(query, chunks)
+        error_category: str | None = None
         try:
             async for delta in self._provider.generate_stream(
                 prompt=prompt,
@@ -168,23 +178,32 @@ class GenerationService:
             ):
                 yield GenerationStreamEvent(event="chunk", data={"text": delta})
         except ProviderError as exc:
-            logger.error("Streaming generation fallback used category=%s", exc.category)
-            yield GenerationStreamEvent(
-                event="chunk",
-                data={"text": "I could not complete the answer. Please try again shortly."},
+            logger.error(
+                "Streaming generation failed category=%s retryable=%s", exc.category, exc.retryable
             )
+            error_category = exc.category
         except Exception:
-            logger.exception("Streaming generation fallback used for unexpected provider failure")
-            yield GenerationStreamEvent(
-                event="chunk",
-                data={"text": "I could not complete the answer. Please try again shortly."},
-            )
-        yield self._complete_event(sources)
+            logger.exception("Streaming generation failed with an unexpected provider error")
+            error_category = "internal"
 
-    def _complete_event(self, sources: list[str]) -> GenerationStreamEvent:
+        if error_category is not None:
+            yield GenerationStreamEvent(
+                event="error",
+                data={"message": STREAM_FAILURE_MESSAGE, "category": error_category},
+            )
+        yield self._complete_event(sources, error_category)
+
+    def _complete_event(
+        self, sources: list[str], error_category: str | None = None
+    ) -> GenerationStreamEvent:
         return GenerationStreamEvent(
             event="complete",
-            data={"sources": sources, "model": self._model},
+            data={
+                "sources": sources,
+                "model": self._model,
+                "degraded": error_category is not None,
+                "error_category": error_category,
+            },
         )
 
     async def generate(self, query: str, chunks: list[RetrievedChunk]) -> GenerationResult:

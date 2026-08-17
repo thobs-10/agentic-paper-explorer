@@ -190,7 +190,12 @@ def test_generation_service_streams_partial_output_and_completion_metadata() -> 
         ("chunk", {"text": "answer [1]."}),
         (
             "complete",
-            {"sources": ["https://arxiv.org/abs/paper-stream"], "model": "test-model"},
+            {
+                "sources": ["https://arxiv.org/abs/paper-stream"],
+                "model": "test-model",
+                "degraded": False,
+                "error_category": None,
+            },
         ),
     ]
     assert provider.calls
@@ -261,3 +266,74 @@ def test_generation_service_returns_fallback_when_provider_fails() -> None:
     assert result.answer.startswith("I could not generate an answer")
     assert result.sources == ["https://arxiv.org/abs/paper-3"]
     assert result.model == "test-model"
+
+
+def test_generation_service_marks_provider_failure_as_degraded() -> None:
+    service = GenerationService(provider=FailingProvider(), model="test-model")
+    chunks = [
+        RetrievedChunk(
+            paper_id="paper-3",
+            title="Reliable Generation",
+            text="Generation can fail transiently.",
+            score=0.8,
+            source_url="https://arxiv.org/abs/paper-3",
+        )
+    ]
+
+    result = asyncio.run(service.answer_question("What can fail?", chunks))
+
+    assert result.degraded is True
+    assert result.error_category == "rate_limit"
+
+
+def test_generation_service_answer_is_not_degraded_on_success() -> None:
+    service = GenerationService(provider=FakeProvider(), model="test-model")
+    chunks = [
+        RetrievedChunk(
+            paper_id="paper-4",
+            title="Working Generation",
+            text="Generation can succeed.",
+            score=0.8,
+            source_url="https://arxiv.org/abs/paper-4",
+        )
+    ]
+
+    result = asyncio.run(service.answer_question("What works?", chunks))
+
+    assert result.degraded is False
+    assert result.error_category is None
+
+
+def test_generation_service_abstention_is_not_marked_degraded() -> None:
+    service = GenerationService(provider=FakeProvider(), model="test-model")
+    chunks = [
+        RetrievedChunk(paper_id="paper-empty", title="Empty", text="  ", score=0.9),
+    ]
+
+    result = asyncio.run(service.answer_question("What does it say?", chunks))
+
+    assert result.degraded is False
+    assert result.error_category is None
+
+
+def test_generation_service_stream_emits_error_event_when_provider_fails() -> None:
+    service = GenerationService(provider=FailingProvider(), model="test-model")
+    chunks = [
+        RetrievedChunk(
+            paper_id="paper-3",
+            title="Reliable Generation",
+            text="Generation can fail transiently.",
+            score=0.8,
+            source_url="https://arxiv.org/abs/paper-3",
+        )
+    ]
+
+    async def collect():
+        return [event async for event in service.stream_answer("What can fail?", chunks)]
+
+    events = asyncio.run(collect())
+
+    assert [event.event for event in events] == ["error", "complete"]
+    assert events[0].data["category"] == "rate_limit"
+    assert events[-1].data["degraded"] is True
+    assert events[-1].data["error_category"] == "rate_limit"

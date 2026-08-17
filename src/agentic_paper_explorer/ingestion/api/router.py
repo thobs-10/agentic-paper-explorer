@@ -53,6 +53,12 @@ app.add_middleware(
 api_router = APIRouter(prefix="/api/v1/ingestion", tags=["ingestion"])
 
 
+@app.get("/health", tags=["health"])
+async def health() -> dict[str, str]:
+    """Report process liveness for container health checks."""
+    return {"status": "ok", "service": "ingestion"}
+
+
 def get_arxiv_client(request: Request) -> ArxivClient:
     """Return the shared arXiv client created at app startup."""
 
