@@ -237,3 +237,70 @@ def test_litellm_provider_streams_partial_deltas(monkeypatch):
 
     assert asyncio.run(collect()) == ["Grounded ", "answer [1]."]
     assert calls[0]["stream"] is True
+
+
+def test_litellm_provider_rejects_empty_answer_content(monkeypatch):
+    fake_module = types.ModuleType("litellm")
+    calls: list[dict[str, object]] = []
+
+    async def fake_acompletion(**kwargs):
+        calls.append(kwargs)
+        # Reasoning-only models expose their text outside `content`.
+        return types.SimpleNamespace(
+            choices=[
+                types.SimpleNamespace(
+                    message=types.SimpleNamespace(content="", reasoning="thinking out loud")
+                )
+            ]
+        )
+
+    fake_module.acompletion = fake_acompletion
+    monkeypatch.setitem(sys.modules, "litellm", fake_module)
+
+    from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider, ProviderError
+
+    provider = LiteLLMProvider(
+        model="test-model",
+        api_base="http://localhost:4000",
+        api_key="test-key",
+        max_retries=0,
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        asyncio.run(provider.generate(prompt="Explain retrieval."))
+
+    assert exc_info.value.category == "empty_response"
+    assert exc_info.value.retryable is False
+    assert len(calls) == 1
+
+
+def test_litellm_provider_rejects_stream_without_content(monkeypatch):
+    fake_module = types.ModuleType("litellm")
+
+    async def fake_acompletion(**kwargs):
+        async def response_stream():
+            yield types.SimpleNamespace(
+                choices=[types.SimpleNamespace(delta=types.SimpleNamespace(content=""))]
+            )
+
+        return response_stream()
+
+    fake_module.acompletion = fake_acompletion
+    monkeypatch.setitem(sys.modules, "litellm", fake_module)
+
+    from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider, ProviderError
+
+    provider = LiteLLMProvider(
+        model="test-model",
+        api_base="http://localhost:4000",
+        api_key="test-key",
+        max_retries=0,
+    )
+
+    async def collect() -> list[str]:
+        return [delta async for delta in provider.generate_stream(prompt="stream me")]
+
+    with pytest.raises(ProviderError) as exc_info:
+        asyncio.run(collect())
+
+    assert exc_info.value.category == "empty_response"
