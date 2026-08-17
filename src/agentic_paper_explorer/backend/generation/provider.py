@@ -8,6 +8,12 @@ from collections.abc import AsyncIterable, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
+# Reasoning-only models return their text in a separate field, leaving `content` blank.
+EMPTY_RESPONSE_MESSAGE = (
+    "The model returned no answer content. Reasoning-only models are not supported "
+    "because their output is not exposed as message content."
+)
+
 
 class ProviderError(RuntimeError):
     """Normalized error raised when a model provider call cannot complete."""
@@ -94,13 +100,11 @@ class LiteLLMProvider:
                 await asyncio.sleep(self._retry_backoff_seconds * (2**attempt))
 
         choices = getattr(response, "choices", [])
-        if not choices:
-            return ""
-        message = getattr(choices[0], "message", None)
-        if message is None:
-            return ""
-        content = getattr(message, "content", "")
-        return str(content or "")
+        message = getattr(choices[0], "message", None) if choices else None
+        content = str(getattr(message, "content", "") or "") if message is not None else ""
+        if not content.strip():
+            raise ProviderError(EMPTY_RESPONSE_MESSAGE, category="empty_response", retryable=False)
+        return content
 
     async def generate_stream(
         self,
@@ -146,6 +150,10 @@ class LiteLLMProvider:
                     if delta:
                         emitted = True
                         yield delta
+                if not emitted:
+                    raise ProviderError(
+                        EMPTY_RESPONSE_MESSAGE, category="empty_response", retryable=False
+                    )
                 return
             except Exception as exc:
                 error = _classify_provider_error(exc)
@@ -186,6 +194,8 @@ def _extract_stream_delta(chunk: object) -> str:
 
 def _classify_provider_error(exc: Exception) -> ProviderError:
     """Map provider exceptions to stable categories and retry decisions."""
+    if isinstance(exc, ProviderError):
+        return exc
     status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
     exception_name = type(exc).__name__.lower()
     message = str(exc) or "LiteLLM provider request failed"
