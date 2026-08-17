@@ -10,7 +10,12 @@ from fastapi import APIRouter, Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from agentic_paper_explorer.backend.api.models import GenerationRequest, GenerationResponse
+from agentic_paper_explorer.backend.api.models import (
+    FeedbackRequest,
+    FeedbackResponse,
+    GenerationRequest,
+    GenerationResponse,
+)
 from agentic_paper_explorer.backend.database.qdrant_client import QdrantRepository
 from agentic_paper_explorer.backend.database.redis_cache import RedisCache
 from agentic_paper_explorer.backend.generation.provider import LiteLLMProvider
@@ -22,6 +27,8 @@ from agentic_paper_explorer.backend.generation.service import (
 from agentic_paper_explorer.backend.retrieval.service import RetrievalResult, RetrievalService
 from agentic_paper_explorer.configs.settings import get_settings
 from agentic_paper_explorer.ingestion.processing.embeddings import embed_query
+from agentic_paper_explorer.monitoring import metrics
+from agentic_paper_explorer.monitoring.feedback import submit_feedback
 
 settings = get_settings()
 
@@ -78,6 +85,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+metrics.setup_metrics(app)
+
 api_router = APIRouter(prefix="/api/v1", tags=["backend"])
 
 
@@ -105,9 +114,17 @@ async def answer_question(
 ) -> GenerationResponse | JSONResponse:
     """Retrieve relevant paper context and answer the user's question grounded in it."""
     retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
+    metrics.record_retrieval(
+        chunk_count=len(retrieval_result.chunks), cached=retrieval_result.cached
+    )
     generation_result: GenerationResult = await generation_service.answer_question(
         request.query,
         retrieval_result.chunks,
+    )
+    metrics.record_answer(
+        "answer",
+        degraded=generation_result.degraded,
+        error_category=generation_result.error_category,
     )
     response = GenerationResponse(
         query=request.query,
@@ -134,6 +151,9 @@ async def stream_answer_question(
 ) -> StreamingResponse:
     """Stream grounded answer text as Server-Sent Events."""
     retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
+    metrics.record_retrieval(
+        chunk_count=len(retrieval_result.chunks), cached=retrieval_result.cached
+    )
 
     async def events():
         yield _format_sse_event(GenerationStreamEvent(event="start", data={"query": request.query}))
@@ -141,6 +161,12 @@ async def stream_answer_question(
             request.query,
             retrieval_result.chunks,
         ):
+            if event.event == "complete":
+                metrics.record_answer(
+                    "stream",
+                    degraded=bool(event.data.get("degraded")),
+                    error_category=_optional_str(event.data.get("error_category")),
+                )
             yield _format_sse_event(event)
 
     return StreamingResponse(
@@ -153,6 +179,18 @@ async def stream_answer_question(
 def _format_sse_event(event: GenerationStreamEvent) -> str:
     """Serialize a generation event using the SSE wire format."""
     return f"event: {event.event}\ndata: {json.dumps(event.data)}\n\n"
+
+
+def _optional_str(value: object) -> str | None:
+    """Coerce an event payload field to a string, preserving absent values as None."""
+    return str(value) if value else None
+
+
+@api_router.post("/feedback", response_model=FeedbackResponse, status_code=status.HTTP_201_CREATED)
+async def record_feedback(request: FeedbackRequest) -> FeedbackResponse:
+    """Record a user rating for a previously generated answer."""
+    submit_feedback(rating=request.rating, query=request.query, comment=request.comment)
+    return FeedbackResponse(rating=request.rating)
 
 
 app.include_router(api_router)

@@ -71,6 +71,18 @@ class GenerationClient:
         except (httpx.HTTPError, ValueError, json.JSONDecodeError) as exc:
             raise GenerationClientError("The streaming service could not be reached.") from exc
 
+    def submit_feedback(self, query: str, rating: str, comment: str | None = None) -> None:
+        """Send a user rating for the most recent answer."""
+        try:
+            response = httpx.post(
+                f"{self._base_url}/api/v1/feedback",
+                json={"query": query, "rating": rating, "comment": comment},
+                timeout=self._timeout,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise GenerationClientError("The feedback could not be submitted.") from exc
+
 
 def _parse_response(payload: object) -> GenerationResponse:
     if not isinstance(payload, dict):
