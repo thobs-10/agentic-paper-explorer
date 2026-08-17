@@ -7,6 +7,8 @@ Ask *"What is attention in neural networks?"* and the system retrieves the most 
 excerpts from a vector store, generates an answer where every claim carries a citation marker, and
 returns the source links so the answer can be checked rather than trusted.
 
+![Streamlit UI answering a question with citation markers](docs/images/ui-answer.png)
+
 ## Why this project exists
 
 Reading research is slow, and general-purpose chatbots answer confidently from memory with no
@@ -213,6 +215,15 @@ Open:
 - RAGAS-based evaluation harness
 - alerting rules and distributed tracing
 - CI/CD pipeline publishing images to Docker Hub
+
+## Monitoring
+
+The provisioned Grafana dashboard at `http://localhost:3000` shows throughput, latency, degraded
+answer rate, answer satisfaction, and retrieval cache effectiveness.
+![Streamlit UI answering a question with citation markers](docs/images/ui-answer.png)
+![Grafana RAG overview dashboard](docs/images/grafana-rag-overview.png)
+![Feedback dashboard](docs/images/feedback.png)
+
 
 ## Author
 
