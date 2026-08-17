@@ -25,6 +25,7 @@ def render_answer(client: GenerationClient, query: str) -> None:
     answer_parts: list[str] = []
     sources: list[str] = []
     model: str | None = None
+    error_message: str | None = None
 
     try:
         for event in client.stream_answer(query):
@@ -32,6 +33,8 @@ def render_answer(client: GenerationClient, query: str) -> None:
                 text = str(event.data.get("text", ""))
                 answer_parts.append(text)
                 answer_placeholder.markdown("".join(answer_parts))
+            elif event.event == "error":
+                error_message = str(event.data.get("message", "Answer generation failed."))
             elif event.event == "complete":
                 sources = [str(source) for source in event.data.get("sources", [])]
                 raw_model = event.data.get("model")
@@ -43,6 +46,8 @@ def render_answer(client: GenerationClient, query: str) -> None:
             _render_non_streaming_fallback(client, query, answer_placeholder)
             return
 
+    if error_message:
+        st.error(error_message)
     if model:
         st.caption(f"Model: {model}")
     render_sources(sources)
@@ -57,6 +62,8 @@ def _render_non_streaming_fallback(
         st.error(str(exc))
         return
     answer_placeholder.markdown(response.answer)
+    if response.degraded:
+        st.error("The answer could not be generated, so no model output is shown above.")
     if response.model:
         st.caption(f"Model: {response.model}")
     render_sources(response.sources)
