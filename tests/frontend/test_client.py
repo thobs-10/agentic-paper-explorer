@@ -96,6 +96,30 @@ def test_generation_client_stream_answer_parses_sse(monkeypatch: pytest.MonkeyPa
     assert events[1].event == "complete"
 
 
+def test_generation_client_keeps_sources_from_degraded_502(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_post(*args: object, **kwargs: object) -> httpx.Response:
+        return httpx.Response(
+            502,
+            request=httpx.Request("POST", "http://localhost:8000/api/v1/generation/answer"),
+            json={
+                "query": "What is retrieval?",
+                "answer": "I could not generate an answer right now.",
+                "sources": ["https://arxiv.org/abs/1"],
+                "model": "test-model",
+                "degraded": True,
+                "error_category": "rate_limit",
+            },
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+
+    result = GenerationClient("http://localhost:8000").answer("What is retrieval?")
+
+    assert result.degraded is True
+    assert result.error_category == "rate_limit"
+    assert result.sources == ["https://arxiv.org/abs/1"]
+
+
 def test_generation_client_maps_http_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_post(*args: object, **kwargs: object) -> httpx.Response:
         return httpx.Response(
