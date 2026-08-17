@@ -51,6 +51,7 @@ def render_answer(client: GenerationClient, query: str) -> None:
     if model:
         st.caption(f"Model: {model}")
     render_sources(sources)
+    _store_answer("".join(answer_parts), sources, model, error_message)
 
 
 def _render_non_streaming_fallback(
@@ -62,11 +63,64 @@ def _render_non_streaming_fallback(
         st.error(str(exc))
         return
     answer_placeholder.markdown(response.answer)
-    if response.degraded:
-        st.error("The answer could not be generated, so no model output is shown above.")
+    error_message = (
+        "The answer could not be generated, so no model output is shown above."
+        if response.degraded
+        else None
+    )
+    if error_message:
+        st.error(error_message)
     if response.model:
         st.caption(f"Model: {response.model}")
     render_sources(response.sources)
+    _store_answer(response.answer, response.sources, response.model, error_message)
+
+
+def _store_answer(
+    answer: str, sources: list[str], model: str | None, error_message: str | None
+) -> None:
+    """Keep the rendered answer so it survives the rerun triggered by a feedback click."""
+    st.session_state["last_answer"] = {
+        "answer": answer,
+        "sources": sources,
+        "model": model,
+        "error": error_message,
+    }
+
+
+def render_stored_answer() -> None:
+    """Re-render the previously generated answer after a Streamlit rerun."""
+    stored = st.session_state.get("last_answer")
+    if not stored:
+        return
+    st.markdown(stored["answer"])
+    if stored["error"]:
+        st.error(stored["error"])
+    if stored["model"]:
+        st.caption(f"Model: {stored['model']}")
+    render_sources(stored["sources"])
+
+
+def render_feedback(client: GenerationClient, query: str) -> None:
+    """Collect a helpful/not-helpful rating with an optional comment."""
+    st.divider()
+    st.caption("Was this answer helpful?")
+    comment = st.text_input("Optional comment", key="feedback_comment")
+    helpful_column, unhelpful_column = st.columns(2)
+    rating: str | None = None
+    if helpful_column.button("Helpful", use_container_width=True):
+        rating = "up"
+    if unhelpful_column.button("Not helpful", use_container_width=True):
+        rating = "down"
+
+    if rating is None:
+        return
+    try:
+        client.submit_feedback(query, rating, comment.strip() or None)
+    except GenerationClientError as exc:
+        st.warning(str(exc))
+        return
+    st.success("Thanks for the feedback.")
 
 
 def main() -> None:
@@ -85,8 +139,15 @@ def main() -> None:
 
     if st.button("Ask", type="primary", disabled=not query.strip(), use_container_width=True):
         st.session_state.pop("last_answer", None)
+        st.session_state["last_query"] = query.strip()
         with st.spinner("Searching the paper context..."):
             render_answer(client, query.strip())
+    else:
+        render_stored_answer()
+
+    last_query = st.session_state.get("last_query")
+    if last_query and st.session_state.get("last_answer"):
+        render_feedback(client, last_query)
 
 
 if __name__ == "__main__":
