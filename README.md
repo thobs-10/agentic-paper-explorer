@@ -65,9 +65,11 @@ Full diagrams, component boundaries, and design trade-offs are in
 | Embeddings | Hugging Face via `langchain-huggingface` and `sentence-transformers` |
 | Model gateway | LiteLLM |
 | Data source | arXiv Atom API, parsed with `defusedxml` |
-| Observability | Prometheus, Grafana, `prometheus-fastapi-instrumentator` |
+| Observability | Prometheus, Grafana, `prometheus-fastapi-instrumentator` (Opik tracing planned, see roadmap) |
 | Testing | pytest, pytest-cov, pytest-randomly, pytest-xdist |
-| Quality and security | ruff, bandit, radon, pre-commit |
+| Quality and security | ruff, bandit, radon, pre-commit (LLM Guard guardrails planned, see roadmap) |
+| Orchestration | Prefect for ingestion pipeline runs (planned, see roadmap) |
+| Evaluation | RAGAS (planned, see roadmap) |
 | Packaging | uv, setuptools |
 | Containers | Docker, Docker Compose |
 
@@ -207,14 +209,16 @@ isolated. Source changes under `src/agentic_paper_explorer` ship with matching t
 Delivered: datastores and the arXiv API, the ingestion pipeline, retrieval, grounded and streaming
 generation, the Streamlit UI, containerization, and monitoring with user feedback.
 
-Open:
+Open, in priority order (see [docs/phases](docs/phases) for the full rationale per phase):
 
-- hybrid retrieval with lexical matching and reranking
-- answer-level caching
-- persisted feedback for qualitative review
-- RAGAS-based evaluation harness
-- alerting rules and distributed tracing
-- CI/CD pipeline publishing images to Docker Hub
+1. [CI/CD pipeline publishing images to Docker Hub](docs/phases/phase-7-cicd.md) - GitHub Actions lint/test/security gate plus a release workflow
+2. [LLM security guardrails](docs/phases/phase-8-security-guardrails.md) - LLM Guard scanners for prompt injection and PII on the query and retrieved context
+3. [Ingestion orchestration](docs/phases/phase-9-orchestration.md) - Prefect flows over the existing ingestion pipeline
+4. [Agentic tracing](docs/phases/phase-10-agentic-tracing.md) - Opik tracing on LiteLLM calls
+5. [RAGAS evaluation harness](docs/phases/phase-11-evaluation.md) - faithfulness, answer relevancy, context precision
+
+Also open: hybrid retrieval with lexical matching and reranking, answer-level caching, and persisted
+feedback for qualitative review.
 
 ## Monitoring
 
