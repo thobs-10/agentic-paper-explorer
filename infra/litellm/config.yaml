@@ -1,0 +1,39 @@
+model_list:
+  - model_name: openrouter/google/gemma-4-26b-a4b-it:free
+    litellm_params:
+      model: openrouter/google/gemma-4-26b-a4b-it:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+guardrails:
+  - guardrail_name: presidio-pii-input
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      presidio_filter_scope: input
+      presidio_language: en
+      presidio_score_thresholds:
+        ALL: 0.7
+      pii_entities_config:
+        EMAIL_ADDRESS: MASK
+        PHONE_NUMBER: MASK
+        CREDIT_CARD: MASK
+        IP_ADDRESS: MASK
+        US_SSN: MASK
+        IBAN_CODE: MASK
+      default_on: true
+  - guardrail_name: presidio-pii-output
+    litellm_params:
+      guardrail: presidio
+      mode: post_call
+      presidio_filter_scope: output
+      presidio_language: en
+      presidio_score_thresholds:
+        ALL: 0.7
+      pii_entities_config:
+        EMAIL_ADDRESS: MASK
+        PHONE_NUMBER: MASK
+        CREDIT_CARD: MASK
+        IP_ADDRESS: MASK
+        US_SSN: MASK
+        IBAN_CODE: MASK
+      default_on: true
