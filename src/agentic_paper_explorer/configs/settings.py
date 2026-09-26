@@ -88,6 +88,11 @@ class Settings(BaseSettings):
         ),
     )
 
+    # TODO: make this a configurable environment variable
+    guardrails_enabled: bool = True
+    guardrail_max_query_chars: int = 1000
+    guardrail_drop_suspicious_chunks: bool = True
+
     # Chunking settings
     chunk_max_characters: int = 1800
     chunk_overlap_characters: int = 200
