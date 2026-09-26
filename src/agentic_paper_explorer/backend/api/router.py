@@ -24,7 +24,10 @@ from agentic_paper_explorer.backend.generation.service import (
     GenerationService,
     GenerationStreamEvent,
 )
-from agentic_paper_explorer.backend.retrieval.service import RetrievalResult, RetrievalService
+from agentic_paper_explorer.backend.retrieval.service import (
+    RetrievalResult,
+    RetrievalService,
+)
 from agentic_paper_explorer.configs.settings import get_settings
 from agentic_paper_explorer.ingestion.processing.embeddings import embed_query
 from agentic_paper_explorer.monitoring import metrics
