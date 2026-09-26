@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import lru_cache
 
-from fastapi import APIRouter, Depends, FastAPI, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -27,7 +28,9 @@ from agentic_paper_explorer.backend.generation.service import (
 from agentic_paper_explorer.backend.retrieval.service import (
     RetrievalResult,
     RetrievalService,
+    RetrievedChunk,
 )
+from agentic_paper_explorer.backend.security.guardrails import GuardrailService
 from agentic_paper_explorer.configs.settings import get_settings
 from agentic_paper_explorer.ingestion.processing.embeddings import embed_query
 from agentic_paper_explorer.monitoring import metrics
@@ -103,6 +106,42 @@ def get_generation_service(request: Request) -> GenerationService:
     return request.app.state.generation_service
 
 
+@lru_cache
+def get_guardrail_service() -> GuardrailService:
+    """Return a process-wide guardrail service; it is stateless, so it needs no lifespan setup."""
+    return GuardrailService(
+        enabled=settings.guardrails_enabled,
+        max_query_chars=settings.guardrail_max_query_chars,
+        drop_suspicious_chunks=settings.guardrail_drop_suspicious_chunks,
+    )
+
+
+GUARDRAIL_REJECTION_MESSAGE = "The request was rejected by the input safety checks."
+
+
+def _screen_query(query: str, guardrails: GuardrailService) -> str:
+    """Return the PII-redacted query, or raise 400 when the query is blocked."""
+    check = guardrails.check_query(query)
+    if not check.allowed:
+        metrics.record_guardrail("query", check.reason or "blocked")
+        # Generic message on purpose: echoing which rule fired helps attackers iterate.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=GUARDRAIL_REJECTION_MESSAGE
+        )
+    if check.redacted_entities:
+        metrics.record_guardrail("query", "pii_redacted")
+    return check.sanitized_query
+
+
+def _screen_context(
+    chunks: list[RetrievedChunk], guardrails: GuardrailService
+) -> list[RetrievedChunk]:
+    """Drop retrieved chunks that carry injected instructions."""
+    check = guardrails.check_context(chunks)
+    metrics.record_guardrail("context", "injection", len(check.dropped_reasons))
+    return check.chunks
+
+
 @app.get("/health", tags=["health"])
 async def health() -> dict[str, str]:
     """Report process liveness for container health checks."""
@@ -114,15 +153,17 @@ async def answer_question(
     request: GenerationRequest,
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
     generation_service: GenerationService = Depends(get_generation_service),
+    guardrails: GuardrailService = Depends(get_guardrail_service),
 ) -> GenerationResponse | JSONResponse:
     """Retrieve relevant paper context and answer the user's question grounded in it."""
-    retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
+    query = _screen_query(request.query, guardrails)
+    retrieval_result: RetrievalResult = await retrieval_service.search(query)
     metrics.record_retrieval(
         chunk_count=len(retrieval_result.chunks), cached=retrieval_result.cached
     )
     generation_result: GenerationResult = await generation_service.answer_question(
-        request.query,
-        retrieval_result.chunks,
+        query,
+        _screen_context(retrieval_result.chunks, guardrails),
     )
     metrics.record_answer(
         "answer",
@@ -130,7 +171,7 @@ async def answer_question(
         error_category=generation_result.error_category,
     )
     response = GenerationResponse(
-        query=request.query,
+        query=query,
         answer=generation_result.answer,
         sources=generation_result.sources,
         model=generation_result.model,
@@ -151,19 +192,20 @@ async def stream_answer_question(
     request: GenerationRequest,
     retrieval_service: RetrievalService = Depends(get_retrieval_service),
     generation_service: GenerationService = Depends(get_generation_service),
+    guardrails: GuardrailService = Depends(get_guardrail_service),
 ) -> StreamingResponse:
     """Stream grounded answer text as Server-Sent Events."""
-    retrieval_result: RetrievalResult = await retrieval_service.search(request.query)
+    # Screen before the stream opens so a blocked query gets a real 400, not a 200 SSE stream.
+    query = _screen_query(request.query, guardrails)
+    retrieval_result: RetrievalResult = await retrieval_service.search(query)
     metrics.record_retrieval(
         chunk_count=len(retrieval_result.chunks), cached=retrieval_result.cached
     )
+    chunks = _screen_context(retrieval_result.chunks, guardrails)
 
     async def events():
-        yield _format_sse_event(GenerationStreamEvent(event="start", data={"query": request.query}))
-        async for event in generation_service.stream_answer(
-            request.query,
-            retrieval_result.chunks,
-        ):
+        yield _format_sse_event(GenerationStreamEvent(event="start", data={"query": query}))
+        async for event in generation_service.stream_answer(query, chunks):
             if event.event == "complete":
                 metrics.record_answer(
                     "stream",
