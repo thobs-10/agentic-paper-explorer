@@ -56,13 +56,12 @@ services:
       LITELLM_LOG_LEVEL: "INFO"
       LITELLM_PORT: "4000"
       DATABASE_URL: "postgresql://litellm:${POSTGRES_PASSWORD:-litellm}@litellm-db:5432/litellm"
-    command:
-      [
-        "--port",
-        "4000",
-        "--model",
-        "openrouter/google/gemma-4-26b-a4b-it:free",
-      ]
+      # Presidio services back the PII guardrails declared in infra/litellm/config.yaml.
+      PRESIDIO_ANALYZER_API_BASE: "http://presidio-analyzer:3000"
+      PRESIDIO_ANONYMIZER_API_BASE: "http://presidio-anonymizer:3000"
+    volumes:
+      - ./infra/litellm/config.yaml:/app/config.yaml:ro
+    command: ["--port", "4000", "--config", "/app/config.yaml"]
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/127.0.0.1/4000'"]
       interval: 10s
@@ -72,6 +71,36 @@ services:
     depends_on:
       litellm-db:
         condition: service_healthy
+      presidio-analyzer:
+        condition: service_healthy
+      presidio-anonymizer:
+        condition: service_healthy
+
+  presidio-analyzer:
+    build:
+      context: ./infra/presidio
+    image: agentic-paper-explorer-presidio-analyzer:local
+    container_name: agentic-paper-explorer-presidio-analyzer
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:2.2.362
+    container_name: agentic-paper-explorer-presidio-anonymizer
+    restart: unless-stopped
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   litellm-db:
     image: postgres:16
@@ -103,8 +132,6 @@ services:
       REDIS_URL: "redis://redis:6379/0"
       LITELLM_API_BASE: "http://litellm:4000"
       LITELLM_API_KEY: "${LITELLM_MASTER_KEY:-sk-1234}"
-      # The litellm_proxy/ prefix routes the call through the proxy container
-      # rather than straight to the upstream provider.
       LITELLM_MODEL_NAME: "${BACKEND_MODEL_NAME:-litellm_proxy/openrouter/google/gemma-4-26b-a4b-it:free}"
       EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
