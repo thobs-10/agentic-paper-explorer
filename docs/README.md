@@ -17,8 +17,8 @@ overview; everything here is the detailed engineering record.
 | [phases/phase-4-streamlit-ui.md](phases/phase-4-streamlit-ui.md) | Streamlit frontend |
 | [phases/phase-5-containerization.md](phases/phase-5-containerization.md) | Images, compose topology, end-to-end validation |
 | [phases/phase-6-monitoring.md](phases/phase-6-monitoring.md) | Metrics, feedback, Grafana dashboard |
-| [phases/phase-7-cicd.md](phases/phase-7-cicd.md) | Planned: CI/CD and Docker Hub publishing (priority 1) |
-| [phases/phase-8-security-guardrails.md](phases/phase-8-security-guardrails.md) | Planned: LLM Guard prompt-injection and PII guardrails (priority 2) |
+| [phases/phase-7-cicd.md](phases/phase-7-cicd.md) | CI/CD gates and Docker Hub publishing |
+| [phases/phase-8-security-guardrails.md](phases/phase-8-security-guardrails.md) | Prompt-injection, PII, and context guardrails (in-process + Presidio via LiteLLM) |
 | [phases/phase-9-orchestration.md](phases/phase-9-orchestration.md) | Planned: Prefect orchestration for ingestion (priority 3) |
 | [phases/phase-10-agentic-tracing.md](phases/phase-10-agentic-tracing.md) | Planned: Opik agentic/LLM-call tracing (priority 4) |
 | [phases/phase-11-evaluation.md](phases/phase-11-evaluation.md) | Planned: RAGAS evaluation harness (priority 5) |

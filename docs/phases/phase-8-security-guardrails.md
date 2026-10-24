@@ -1,8 +1,8 @@
-# Phase 8 - LLM security guardrails (planned, priority 2)
+# Phase 8 - LLM security guardrails (delivered)
 
 `project.md` lists "Security AI guardrails: TBC". This phase resolves that TBC with a lightweight,
-open-source choice that fits the existing LiteLLM-gateway architecture without adding a new service
-to operate.
+open-source choice that fits the existing LiteLLM-gateway architecture with only two small
+Presidio containers behind the gateway.
 
 ## Why priority 2
 
@@ -22,31 +22,63 @@ jailbreak attempts, or PII leaking into logs and cached prompts.
 
 ## Tool choice
 
-**LLM Guard** (open source, MIT-licensed, `pip install llm-guard`) as input/output scanners, invoked
-as plain Python functions inside the existing FastAPI handlers - no extra service, no extra
-container.
+**Two layers, split by where the data is:**
 
-Considered and rejected for this phase:
+| Layer | Tool | Owns |
+| --- | --- | --- |
+| LiteLLM proxy (centralized) | Built-in `presidio` guardrail + slim Presidio analyzer (`infra/presidio/`) and the official anonymizer | PII masking on every prompt sent to the provider (`pre_call`) and every answer returned (`post_call`). Configured in `infra/litellm/config.yaml`, no application code. |
+| Backend, in-process | `backend/security/guardrails.py` (pure Python, regex, no new dependencies) | Query length limit, direct prompt-injection/jailbreak heuristics (HTTP 400), PII redaction of the query **before** it reaches the Redis cache key, embeddings, and logs, and dropping retrieved chunks that carry injected instructions. |
+| Prompt | `DEFAULT_SYSTEM_PROMPT` security rules | Tells the model excerpts are untrusted data and must never be followed as instructions. |
+
+Why not everything in the gateway: the proxy only sees the final assembled prompt. By
+then the query has already been cached, embedded, and logged, and user text is mixed with paper
+text, so the proxy cannot tell a user's injection from a paper that merely *discusses* injection,
+and can only block a whole request rather than drop one bad chunk.
+
+Why heuristics instead of an ML classifier: this is a learning/portfolio system, not a public
+service. Regex rules are deterministic, testable, and add no `torch` weight to the image. Swapping
+`detect_injection` for a classifier (e.g. Llama Prompt Guard 2) later touches one function.
+
+Considered and rejected:
 
 | Option | Why not now |
 | --- | --- |
-| NeMo Guardrails | Heavier: requires its own Colang config language and a runtime; overkill for one query/answer endpoint |
-| Guardrails AI (`guardrails-ai`) | Strong for structured output validation, but the project's output is already a typed Pydantic contract; adds a second validation layer for little gain |
-| Rolling a custom regex/keyword filter | Fastest to write, weakest coverage (no jailbreak pattern library, no PII detection) |
+| Stock Presidio analyzer image | Loads `en_core_web_lg` (~1 GB RAM) for NER this project does not use: every masked entity type is regex/checksum-based. The slim build uses `en_core_web_sm` instead. |
+| Guardrails AI | Hub validators need a Guardrails Hub token at build time and pull ML models, which is heavy for the value here |
+| LLM Guard | Archived/unmaintained |
+| NeMo Guardrails | Requires its own Colang config language and runtime; overkill for one query/answer endpoint |
 
-LLM Guard wins on the project's own criteria: open source, a small pure-Python dependency, and
-scanners (`PromptInjection`, `Anonymize`/PII, `TokenLimit`, `Toxicity`) that map directly onto the
-threat model above.
+Patterns are written against imperative attack phrasing ("ignore previous instructions", "reveal
+your system prompt"), not topic words, so research questions *about* jailbreaks still work.
 
-## What to build
+## What was built
 
 | Concern | Location |
 | --- | --- |
-| Guardrail scanning functions | `src/agentic_paper_explorer/backend/security/guardrails.py` (new) |
-| Wire into the generation router | `src/agentic_paper_explorer/backend/api/router.py` - scan the incoming query before retrieval, scan retrieved chunk text before it enters the prompt |
-| Config (enabled scanners, thresholds) | `src/agentic_paper_explorer/configs/settings.py` - new `GuardrailSettings`, env-driven |
-| Metrics | extend `monitoring/metrics.py` with a `rag_guardrail_blocks_total{scanner, stage}` counter, following the existing pattern |
-| Tests | `tests/backend/security/test_guardrails.py` (new), mirroring the existing test layout |
+| Gateway PII guardrails | `infra/litellm/config.yaml` (model list + `presidio` guardrails; replaces the `--model` CLI flag), `presidio-analyzer` / `presidio-anonymizer` services in `docker-compose.yml` |
+| Slim Presidio analyzer | `infra/presidio/Dockerfile` + `nlp-config.yaml`: official image with `en_core_web_sm` instead of `en_core_web_lg`, one worker, `mem_limit: 512m` |
+| Query and context guardrails | `src/agentic_paper_explorer/backend/security/guardrails.py` |
+| Router wiring | `backend/api/router.py`: `_screen_query` before retrieval, `_screen_context` before generation, on both `/answer` and `/answer/stream` |
+| Config | `GUARDRAILS_ENABLED`, `GUARDRAIL_MAX_QUERY_CHARS`, `GUARDRAIL_DROP_SUSPICIOUS_CHUNKS` in `configs/settings.py` |
+| Metrics | `rag_guardrail_events_total{stage, reason}` in `monitoring/metrics.py` |
+| Tests | `tests/backend/security/test_guardrails.py`, guardrail cases in `tests/backend/api/test_generation_router.py` |
+
+## Known limits (accepted trade-offs)
+
+- Heuristics catch common, low-effort attacks only; paraphrased or encoded attacks will pass.
+  The hardened system prompt and gateway guardrails are the remaining layers.
+- Names and street addresses are not redacted anywhere: `PERSON`/`LOCATION` need NER, which is
+  weak with the small spaCy model and would mask author names in paper excerpts.
+- The slim analyzer scores phone numbers at 0.4 and IP addresses at 0.6 without nearby context
+  words, so the gateway uses per-entity thresholds (`PHONE_NUMBER: 0.4`, `IP_ADDRESS: 0.6`) instead
+  of the `ALL: 0.7` default. Side effect: any standalone 10-digit number (a random seed, a token
+  count) is masked as a phone number. arXiv IDs, DOIs, years, and decimals are not affected.
+- The analyzer image on disk stays large because it derives from the official image (the `lg`
+  model is in a lower layer); only runtime memory shrinks.
+- `post_call` guardrails are weaker on streamed responses than on buffered ones; verify against
+  `/answer/stream` before relying on output masking there.
+- `LITELLM_MASTER_KEY` still defaults to `sk-1234` in compose; require it from the environment
+  before any non-local deployment.
 
 ## Request flow with guardrails
 
@@ -57,33 +89,24 @@ sequenceDiagram
     participant S as Guardrail scanners
     participant R as RetrievalService
     participant G as GenerationService
+    participant L as LiteLLM proxy + Presidio
 
     U->>A: POST /answer {query}
-    A->>S: scan_input(query)
+    A->>S: check_query(query)
     alt blocked
-        S-->>A: risk score above threshold
+        S-->>A: too long or injection pattern matched
         A-->>U: 400 with a generic rejection, no internals leaked
     else clean
-        A->>R: retrieve(query)
+        S-->>A: PII-redacted query
+        A->>R: retrieve(redacted query)
         R-->>A: chunks
-        A->>S: scan_context(chunks)
-        S-->>A: sanitized/flagged chunks
+        A->>S: check_context(chunks)
+        S-->>A: chunks minus injected ones
         A->>G: generate(query, chunks)
+        G->>L: prompt
+        L->>L: pre_call PII mask, LLM call, post_call PII mask
+        L-->>G: answer
         G-->>A: answer
         A-->>U: answer
     end
 ```
-
-## Concrete steps
-
-1. Add `llm-guard` to the `backend` optional-dependency group in `pyproject.toml`.
-2. Implement `scan_input(query: str) -> ScanResult` using LLM Guard's `PromptInjection` and
-   `TokenLimit` scanners, returning a typed result the router can branch on.
-3. Implement `scan_context(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]` to catch indirect
-   injection from paper abstracts before they reach the LLM prompt.
-4. Reject blocked requests with `HTTP 400` and a generic message; log the scanner name and score,
-   never the raw flagged text, to avoid persisting the injected payload.
-5. Add rate limiting only if abuse is observed in practice - `project.md` already says not to add
-   gateways/rate limiters without a clear need, so this stays a follow-up, not part of this phase.
-6. Keep `bandit` and `git-secrets` (already in the toolchain) as the static/secret-scanning half of
-   security; this phase is specifically about runtime LLM input/output safety.
