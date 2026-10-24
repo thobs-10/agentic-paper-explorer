@@ -13,6 +13,10 @@ guardrails:
       presidio_language: en
       presidio_score_thresholds:
         ALL: 0.7
+        # The slim analyzer scores phone and IP matches below 0.7 unless context words appear
+        # nearby. We will keep these thresholds identical in presidio-pii-output.
+        PHONE_NUMBER: 0.4
+        IP_ADDRESS: 0.6
       pii_entities_config:
         EMAIL_ADDRESS: MASK
         PHONE_NUMBER: MASK
@@ -29,6 +33,8 @@ guardrails:
       presidio_language: en
       presidio_score_thresholds:
         ALL: 0.7
+        PHONE_NUMBER: 0.4
+        IP_ADDRESS: 0.6
       pii_entities_config:
         EMAIL_ADDRESS: MASK
         PHONE_NUMBER: MASK
