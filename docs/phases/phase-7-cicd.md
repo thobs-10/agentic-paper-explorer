@@ -1,4 +1,4 @@
-# Phase 7 - CI/CD and Docker Hub publishing (planned, priority 1)
+# Phase 7 - CI/CD and Docker Hub publishing (delivered)
 
 This is the first of the remaining phases because every later phase (guardrails, orchestration,
 tracing, evaluation) needs a pipeline that already runs tests, lint, and security scans on every

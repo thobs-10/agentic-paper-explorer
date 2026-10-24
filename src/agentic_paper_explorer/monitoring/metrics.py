@@ -51,6 +51,13 @@ feedback_total = Counter(
 )
 
 
+guardrail_events_total = Counter(
+    "rag_guardrail_events_total",
+    "Guardrail interventions grouped by pipeline stage and reason.",
+    labelnames=("stage", "reason"),
+)
+
+
 def _initialize_label_values() -> None:
     """Create zero-valued series so dashboards render before the first event."""
     for endpoint in ("answer", "stream"):
@@ -79,6 +86,12 @@ def record_retrieval(*, chunk_count: int, cached: bool) -> None:
 def record_feedback(rating: str) -> None:
     """Record one user feedback submission."""
     feedback_total.labels(rating=rating).inc()
+
+
+def record_guardrail(stage: str, reason: str, count: int = 1) -> None:
+    """Record guardrail interventions, e.g. stage="query" reason="injection"."""
+    if count > 0:
+        guardrail_events_total.labels(stage=stage, reason=reason).inc(count)
 
 
 def setup_metrics(app: FastAPI) -> None:
