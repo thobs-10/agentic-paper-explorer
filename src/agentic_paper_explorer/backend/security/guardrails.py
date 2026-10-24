@@ -24,7 +24,7 @@ from agentic_paper_explorer.backend.retrieval.service import RetrievedChunk
 logger = logging.getLogger(__name__)
 
 
-INJECTION_PATTERNS: dict[str, re.Pattern[str]] = {
+_INJECTION_PATTERNS: dict[str, re.Pattern[str]] = {
     # ignore instructions pattern
     "ignore_instructions": re.compile(
         r"\b(ignore|disregard|forget|override)\b.{0,30}\b(previous|prior|above|earlier|all|your)"
@@ -53,7 +53,7 @@ INJECTION_PATTERNS: dict[str, re.Pattern[str]] = {
 }
 
 # PII patterns for lightweight, in-process detection and redaction.
-PII_PATTERNS: dict[str, re.Pattern[str]] = {
+_PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "EMAIL_ADDRESS": re.compile(r"\b[\w.+-]+@[\w-]+(\.[\w-]+)+\b"),
     "CREDIT_CARD": re.compile(r"\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{1,4}\b"),
     "PHONE_NUMBER": re.compile(
@@ -96,7 +96,7 @@ def detect_injection(text: str | None) -> str | None:
 
     if not text:
         return None
-    for name, pattern in INJECTION_PATTERNS.items():
+    for name, pattern in _INJECTION_PATTERNS.items():
         if pattern.search(text):
             return name
     return None
@@ -113,7 +113,7 @@ def redact_pii(text: str) -> tuple[str, tuple[str, ...]]:
         A tuple containing the sanitized text and a tuple of the entity types found.
     """
     found: list[str] = []
-    for entity, pattern in PII_PATTERNS.items():
+    for entity, pattern in _PII_PATTERNS.items():
         text, count = pattern.subn(f"<{entity}>", text)
         if count:
             found.append(entity)
