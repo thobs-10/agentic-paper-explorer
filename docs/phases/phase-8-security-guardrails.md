@@ -69,6 +69,10 @@ your system prompt"), not topic words, so research questions *about* jailbreaks 
   The hardened system prompt and gateway guardrails are the remaining layers.
 - Names and street addresses are not redacted anywhere: `PERSON`/`LOCATION` need NER, which is
   weak with the small spaCy model and would mask author names in paper excerpts.
+- The slim analyzer scores phone numbers at 0.4 and IP addresses at 0.6 without nearby context
+  words, so the gateway uses per-entity thresholds (`PHONE_NUMBER: 0.4`, `IP_ADDRESS: 0.6`) instead
+  of the `ALL: 0.7` default. Side effect: any standalone 10-digit number (a random seed, a token
+  count) is masked as a phone number. arXiv IDs, DOIs, years, and decimals are not affected.
 - The analyzer image on disk stays large because it derives from the official image (the `lg`
   model is in a lower layer); only runtime memory shrinks.
 - `post_call` guardrails are weaker on streamed responses than on buffered ones; verify against
