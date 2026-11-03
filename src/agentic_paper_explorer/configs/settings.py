@@ -7,6 +7,11 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 DEFAULT_ALLOWED_ORIGINS = ["http://localhost:8501"]
+# example queries that will be used to search and ingest sources from about these topics
+DEFAULT_INGESTION_SCHEDULE_QUERIES = [
+    'all:"retrieval augmented generation"',
+    'all:"large language model agents"',
+]
 
 
 class Settings(BaseSettings):
@@ -96,6 +101,14 @@ class Settings(BaseSettings):
     # Chunking settings
     chunk_max_characters: int = 1800
     chunk_overlap_characters: int = 200
+
+    # prefect scheduling for generating json for each query
+    ingestion_schedule_queries: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_INGESTION_SCHEDULE_QUERIES)
+    )
+    ingestion_schedule_cron: str = "0 2 * * *"
+    ingestion_schedule_timezone: str = "UTC"
+    ingestion_schedule_max_results: int = 25
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
