@@ -35,6 +35,10 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         "RETRIEVAL_TOP_K",
         "RETRIEVAL_SCORE_THRESHOLD",
         "RETRIEVAL_CACHE_TTL_SECONDS",
+        "INGESTION_SCHEDULE_QUERIES",
+        "INGESTION_SCHEDULE_CRON",
+        "INGESTION_SCHEDULE_TIMEZONE",
+        "INGESTION_SCHEDULE_MAX_RESULTS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -60,6 +64,30 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
     assert settings.retrieval_top_k == 5
     assert settings.retrieval_score_threshold == 0.2
     assert settings.retrieval_cache_ttl_seconds == 3600
+    assert settings.ingestion_schedule_queries == [
+        'all:"retrieval augmented generation"',
+        'all:"large language model agents"',
+    ]
+    assert settings.ingestion_schedule_cron == "0 2 * * *"
+    assert settings.ingestion_schedule_timezone == "UTC"
+    assert settings.ingestion_schedule_max_results == 25
+
+
+def test_settings_parses_json_list_of_schedule_queries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(
+        "INGESTION_SCHEDULE_QUERIES", '["all:transformer", "all:\\"graph neural network\\""]'
+    )
+    monkeypatch.setenv("INGESTION_SCHEDULE_CRON", "30 3 * * 1")
+    monkeypatch.setenv("INGESTION_SCHEDULE_MAX_RESULTS", "5")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ingestion_schedule_queries == [
+        "all:transformer",
+        'all:"graph neural network"',
+    ]
+    assert settings.ingestion_schedule_cron == "30 3 * * 1"
+    assert settings.ingestion_schedule_max_results == 5
 
 
 def test_settings_parses_comma_separated_allowed_origins(monkeypatch: pytest.MonkeyPatch) -> None:
