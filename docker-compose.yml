@@ -172,6 +172,8 @@ services:
       EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
       ARXIV_BASE_URL: "${ARXIV_BASE_URL:-https://export.arxiv.org/api/query}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+      # Optional; authenticated Hugging Face downloads are faster and less rate-limited.
+      HF_TOKEN:
     volumes:
       - hf_cache:/home/app/.cache/huggingface
     depends_on:
@@ -219,7 +221,7 @@ services:
       start_period: 30s
 
   ingestion-flows:
-    # Same image as `ingestion`; serves the nightly Prefect deployments instead of the API.
+    # Same image as `ingestion`; serves the scheduled Prefect deployments instead of the API.
     build:
       context: .
       target: ingestion
@@ -235,11 +237,12 @@ services:
       # Left without a value so it is only passed through when set: an empty string is not a
       # valid JSON list, and unset falls back to the defaults in configs/settings.py.
       INGESTION_SCHEDULE_QUERIES:
-      INGESTION_SCHEDULE_CRON: "${INGESTION_SCHEDULE_CRON:-0 2 * * *}"
+      INGESTION_SCHEDULE_CRON: "${INGESTION_SCHEDULE_CRON:-0 2 15 * *}"
       INGESTION_SCHEDULE_TIMEZONE: "${INGESTION_SCHEDULE_TIMEZONE:-UTC}"
       INGESTION_SCHEDULE_MAX_RESULTS: "${INGESTION_SCHEDULE_MAX_RESULTS:-25}"
       PREFECT_API_URL: "http://prefect-server:4200/api"
       PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      HF_TOKEN:
     volumes:
       - hf_cache:/home/app/.cache/huggingface
     depends_on:
