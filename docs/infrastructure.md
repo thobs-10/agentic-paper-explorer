@@ -8,6 +8,10 @@ multi-stage [Dockerfile](../Dockerfile).
 | `frontend` | 8501 | Streamlit UI |
 | `backend` | 8000 | Retrieval + generation API |
 | `ingestion` | 8001 | arXiv ingestion API |
+| `ingestion-flows` | internal | Serves the scheduled Prefect ingestion deployments |
+| `prefect-server` | 4200 | Prefect API and UI (run history, schedules) |
+| `presidio-analyzer` | internal | PII detection for the LiteLLM guardrails |
+| `presidio-anonymizer` | internal | PII masking for the LiteLLM guardrails |
 | `litellm` | 4000 | Model gateway |
 | `litellm-db` | internal | LiteLLM metadata store |
 | `qdrant` | 6333 / 6334 | Vector database (HTTP / gRPC) |
@@ -36,11 +40,13 @@ make logs           # tail application logs
 make down           # stop and remove services
 ```
 
-Every service declares a health check, so `docker compose ps` reports readiness rather than just
+Every service except `ingestion-flows` (a scheduler process with no HTTP endpoint) declares a
+health check, so `docker compose ps` reports readiness rather than just
 container liveness. Dependencies use `condition: service_healthy`, so the backend does not start
 before Qdrant, Redis, and the model gateway are actually accepting connections. Data persists in the
-`qdrant_data`, `redis_data`, `litellm_pg_data`, `hf_cache`, `prometheus_data`, and `grafana_data`
-named volumes; `hf_cache` is shared between the backend and ingestion containers so the embedding
+`qdrant_data`, `redis_data`, `litellm_pg_data`, `hf_cache`, `prometheus_data`, `grafana_data`, and
+`prefect_data` named volumes; `hf_cache` is shared between the backend, ingestion, and
+ingestion-flows containers so the embedding
 model is downloaded once.
 
 ## Rebuild rules

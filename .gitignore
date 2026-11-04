@@ -223,3 +223,5 @@ AGENTS.md
 project.md
 copilot-instructions.md
 .DS_Store
+.vscode/*
+.vscode

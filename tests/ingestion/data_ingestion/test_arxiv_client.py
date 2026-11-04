@@ -9,6 +9,7 @@ from defusedxml import ElementTree as DefusedElementTree
 from agentic_paper_explorer.ingestion.data_ingestion import arxiv_client as arxiv_module
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
     ATOM_NAMESPACE,
+    NEWEST_FIRST,
     ArxivClient,
     ArxivPaperRecord,
     ArxivSearchResult,
@@ -79,7 +80,31 @@ def test_search_papers_uses_asyncio_to_thread(monkeypatch: pytest.MonkeyPatch) -
         "search_query": "all:graph",
         "start": 3,
         "max_results": 7,
+        "sort": None,
     }
+
+
+def test_search_papers_sync_adds_sort_parameters_when_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = ArxivClient(min_request_interval_seconds=0)
+    requested: list[str] = []
+    empty = ArxivSearchResult(total_results=0, start_index=0, items_per_page=0, papers=[])
+
+    def fake_get_with_retry(request_url: str) -> str:
+        requested.append(request_url)
+        return ""
+
+    monkeypatch.setattr(client, "_get_with_retry", fake_get_with_retry)
+    monkeypatch.setattr(ArxivClient, "parse_search_response", staticmethod(lambda _: empty))
+
+    client._search_papers_sync(search_query="all:rag", start=0, max_results=5, sort=NEWEST_FIRST)
+    client.close()
+
+    assert requested == [
+        "https://export.arxiv.org/api/query?search_query=all%3Arag&start=0&max_results=5"
+        "&sortBy=submittedDate&sortOrder=descending"
+    ]
 
 
 def test_search_papers_sync_builds_request_and_reads_payload(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -20,6 +20,21 @@ ARXIV_API_URL: Final[str] = "https://export.arxiv.org/api/query"
 ARXIV_USER_AGENT: Final[str] = "agentic-paper-explorer/0.1.0"
 # arXiv rate limits and transient upstream issues are retried; anything else fails fast.
 RETRYABLE_STATUS_CODES: Final[frozenset[int]] = frozenset({429, 500, 502, 503, 504})
+
+ArxivSortBy = Literal["relevance", "lastUpdatedDate", "submittedDate"]
+ArxivSortOrder = Literal["ascending", "descending"]
+
+
+@dataclass(slots=True, frozen=True)
+class ArxivSort:
+    """Result ordering for an arXiv query. Without one, arXiv ranks by relevance."""
+
+    by: ArxivSortBy
+    order: ArxivSortOrder = "descending"
+
+
+# Most recently submitted first, so recurring runs pick up new papers instead of the same top hits.
+NEWEST_FIRST: Final[ArxivSort] = ArxivSort(by="submittedDate", order="descending")
 
 
 @dataclass(slots=True, frozen=True)
@@ -88,12 +103,14 @@ class ArxivClient:
         search_query: str,
         start: int = 0,
         max_results: int = 10,
+        sort: ArxivSort | None = None,
     ) -> ArxivSearchResult:
         """Fetch papers from arXiv for a query window.
         Args:
             search_query: The arXiv search query string, e.g. "all:transformer".
             start: Zero-based index for the first result to fetch.
             max_results: Number of results to fetch (max 100).
+            sort: Optional result ordering; arXiv's relevance ranking when omitted.
         Returns:
             An `ArxivSearchResult` containing the normalized paper records.
         """
@@ -103,6 +120,7 @@ class ArxivClient:
             search_query=search_query,
             start=start,
             max_results=max_results,
+            sort=sort,
         )
 
     def _search_papers_sync(
@@ -111,6 +129,7 @@ class ArxivClient:
         search_query: str,
         start: int,
         max_results: int,
+        sort: ArxivSort | None = None,
     ) -> ArxivSearchResult:
         """Fetch papers from arXiv for a query window (synchronous).
 
@@ -118,18 +137,20 @@ class ArxivClient:
             search_query (str): The arXiv search query string, e.g. "all:transformer".
             start (int): Zero-based index for the first result to fetch.
             max_results (int): Number of results to fetch (max 100).
+            sort (ArxivSort | None): Optional result ordering.
 
         Returns:
             ArxivSearchResult: The normalized paper records.
         """
         # Build the query string and request URL
-        query_string = urlencode(
-            {
-                "search_query": search_query,
-                "start": start,
-                "max_results": max_results,
-            }
-        )
+        params: dict[str, str | int] = {
+            "search_query": search_query,
+            "start": start,
+            "max_results": max_results,
+        }
+        if sort is not None:
+            params |= {"sortBy": sort.by, "sortOrder": sort.order}
+        query_string = urlencode(params)
         request_url = f"{self._base_url}?{query_string}"
         payload = self._get_with_retry(request_url)
         return self.parse_search_response(payload)
