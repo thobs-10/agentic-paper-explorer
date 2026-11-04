@@ -16,7 +16,10 @@ from prefect.cache_policies import NO_CACHE
 from agentic_paper_explorer.backend.database.qdrant_client import QdrantRepository
 from agentic_paper_explorer.configs.settings import get_settings
 from agentic_paper_explorer.ingestion import pipeline
-from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import ArxivPaperRecord
+from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
+    NEWEST_FIRST,
+    ArxivPaperRecord,
+)
 from agentic_paper_explorer.ingestion.data_ingestion.batch_reader import iter_arxiv_papers
 from agentic_paper_explorer.ingestion.pipeline import IngestionSummary
 from agentic_paper_explorer.ingestion.processing.chunking import PaperChunk
@@ -79,6 +82,8 @@ async def ingestion_flow(search_query: str, max_total_results: int | None = 10) 
             search_query=search_query,
             max_results_per_page=settings.arxiv_max_results_per_page,
             max_total_results=max_total_results,
+            # Scheduled runs want what is new since the last run, not the same most-relevant hits.
+            sort=NEWEST_FIRST,
         ):
             papers_processed += len(page)
             chunks = chunk_page_task(
