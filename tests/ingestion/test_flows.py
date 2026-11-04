@@ -10,7 +10,10 @@ from agentic_paper_explorer.backend.database.qdrant_client import QdrantPoint
 from agentic_paper_explorer.configs.settings import Settings
 from agentic_paper_explorer.ingestion import flows as flows_module
 from agentic_paper_explorer.ingestion import pipeline as pipeline_module
-from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import ArxivPaperRecord
+from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
+    NEWEST_FIRST,
+    ArxivPaperRecord,
+)
 from agentic_paper_explorer.ingestion.pipeline import IngestionSummary
 
 
@@ -67,10 +70,14 @@ def _prefect_backend() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _patch_pipeline_collaborators(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_pipeline_collaborators(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Patch the flow's collaborators and return the recorded `iter_arxiv_papers` kwargs."""
+    iter_calls: list[dict[str, object]] = []
+
     async def fake_iter_arxiv_papers(
-        *_args: object, **_kwargs: object
+        *_args: object, **kwargs: object
     ) -> AsyncIterator[list[ArxivPaperRecord]]:
+        iter_calls.append(kwargs)
         yield [_make_paper("p1"), _make_paper("p2")]
 
     async def fake_embed_texts(texts: list[str], *, model_name: str) -> list[list[float]]:
@@ -86,6 +93,7 @@ def _patch_pipeline_collaborators(monkeypatch: pytest.MonkeyPatch) -> None:
         "upsert_chunks_task",
         flows_module.upsert_chunks_task.with_options(retry_delay_seconds=0),
     )
+    return iter_calls
 
 
 def _use_repository(
@@ -140,3 +148,14 @@ def test_ingestion_flow_does_not_retry_embedding_failure(monkeypatch: pytest.Mon
         asyncio.run(flows_module.ingestion_flow("all:graph"))
 
     assert len(embed_calls) == 1
+
+
+def test_ingestion_flow_fetches_newest_papers_first(
+    monkeypatch: pytest.MonkeyPatch, _patch_pipeline_collaborators: list[dict[str, object]]
+) -> None:
+    _use_repository(monkeypatch, FlakyQdrantRepository())
+
+    asyncio.run(flows_module.ingestion_flow("all:graph", max_total_results=3))
+
+    assert _patch_pipeline_collaborators[0]["sort"] == NEWEST_FIRST
+    assert _patch_pipeline_collaborators[0]["max_total_results"] == 3
