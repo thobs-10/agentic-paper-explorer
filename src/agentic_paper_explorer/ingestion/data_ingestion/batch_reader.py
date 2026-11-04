@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
     ArxivClient,
     ArxivPaperRecord,
+    ArxivSort,
 )
 
 
@@ -16,6 +17,7 @@ async def iter_arxiv_papers(
     search_query: str,
     max_results_per_page: int,
     max_total_results: int | None = None,
+    sort: ArxivSort | None = None,
 ) -> AsyncIterator[list[ArxivPaperRecord]]:
     """Yield successive pages of papers for a search query.
 
@@ -27,6 +29,7 @@ async def iter_arxiv_papers(
         search_query: The search query to use for the arXiv API.
         max_results_per_page: The maximum number of results to fetch per page.
         max_total_results: Optional maximum number of total results to fetch.
+        sort: Optional result ordering, applied to every page.
     Yields:
         Lists of `ArxivPaperRecord` objects, one list per page of results.
     """
@@ -37,6 +40,7 @@ async def iter_arxiv_papers(
             search_query=search_query,
             start=start,
             max_results=max_results_per_page,
+            sort=sort,
         )
         if not result.papers:
             return
