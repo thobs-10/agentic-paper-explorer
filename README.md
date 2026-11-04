@@ -70,7 +70,7 @@ Full diagrams, component boundaries, and design trade-offs are in
 | Quality and security | ruff, bandit, radon, pre-commit, gitleaks |
 | LLM guardrails | In-process regex guardrails (query length, prompt injection, PII redaction, context screening) plus Presidio PII masking in the LiteLLM proxy |
 | CI/CD | GitHub Actions, Docker Hub |
-| Orchestration | Prefect for ingestion pipeline runs (planned, see roadmap) |
+| Orchestration | Prefect (self-hosted server and UI) for scheduled ingestion runs |
 | Evaluation | RAGAS (planned, see roadmap) |
 | Packaging | uv, setuptools |
 | Containers | Docker, Docker Compose |
@@ -210,14 +210,14 @@ isolated. Source changes under `src/agentic_paper_explorer` ship with matching t
 
 Delivered: datastores and the arXiv API, the ingestion pipeline, retrieval, grounded and streaming
 generation, the Streamlit UI, containerization, monitoring with user feedback,
-[CI/CD with Docker Hub publishing](docs/phases/phase-7-cicd.md), and
-[LLM security guardrails](docs/phases/phase-8-security-guardrails.md).
+[CI/CD with Docker Hub publishing](docs/phases/phase-7-cicd.md),
+[LLM security guardrails](docs/phases/phase-8-security-guardrails.md), and
+[Prefect orchestration for scheduled ingestion](docs/phases/phase-9-orchestration.md).
 
 Open, in priority order (see [docs/phases](docs/phases) for the full rationale per phase):
 
-1. [Ingestion orchestration](docs/phases/phase-9-orchestration.md) - Prefect flows over the existing ingestion pipeline
-2. [Agentic tracing](docs/phases/phase-10-agentic-tracing.md) - Opik tracing on LiteLLM calls
-3. [RAGAS evaluation harness](docs/phases/phase-11-evaluation.md) - faithfulness, answer relevancy, context precision
+1. [Agentic tracing](docs/phases/phase-10-agentic-tracing.md) - Opik tracing on LiteLLM calls
+2. [RAGAS evaluation harness](docs/phases/phase-11-evaluation.md) - faithfulness, answer relevancy, context precision
 
 Also open: hybrid retrieval with lexical matching and reranking, answer-level caching, and persisted
 feedback for qualitative review.
