@@ -172,6 +172,8 @@ services:
       EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
       ARXIV_BASE_URL: "${ARXIV_BASE_URL:-https://export.arxiv.org/api/query}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:8501}"
+      # Optional; authenticated Hugging Face downloads are faster and less rate-limited.
+      HF_TOKEN:
     volumes:
       - hf_cache:/home/app/.cache/huggingface
     depends_on:
@@ -189,6 +191,65 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  prefect-server:
+    # Pinned to the same Prefect version as the client in uv.lock; API and UI share one port.
+    image: prefecthq/prefect:3.9.0-python3.12
+    container_name: agentic-paper-explorer-prefect-server
+    restart: unless-stopped
+    mem_limit: 768m
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    ports:
+      - "${PREFECT_PORT:-4200}:4200"
+    environment:
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      PREFECT_UI_API_URL: "http://localhost:${PREFECT_PORT:-4200}/api"
+    volumes:
+      # Default SQLite database lives under PREFECT_HOME (/root/.prefect).
+      - prefect_data:/root/.prefect
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ingestion-flows:
+    # Same image as `ingestion`; serves the scheduled Prefect deployments instead of the API.
+    build:
+      context: .
+      target: ingestion
+    container_name: agentic-paper-explorer-ingestion-flows
+    restart: unless-stopped
+    mem_limit: 1536m
+    command: ["python", "-m", "agentic_paper_explorer.ingestion.deployment"]
+    environment:
+      QDRANT_URL: "http://qdrant:6333"
+      QDRANT_COLLECTION_NAME: "${QDRANT_COLLECTION_NAME:-arxiv_papers}"
+      EMBEDDING_MODEL_NAME: "${EMBEDDING_MODEL_NAME:-BAAI/bge-small-en-v1.5}"
+      ARXIV_BASE_URL: "${ARXIV_BASE_URL:-https://export.arxiv.org/api/query}"
+      # Left without a value so it is only passed through when set: an empty string is not a
+      # valid JSON list, and unset falls back to the defaults in configs/settings.py.
+      INGESTION_SCHEDULE_QUERIES:
+      INGESTION_SCHEDULE_CRON: "${INGESTION_SCHEDULE_CRON:-0 2 15 * *}"
+      INGESTION_SCHEDULE_TIMEZONE: "${INGESTION_SCHEDULE_TIMEZONE:-UTC}"
+      INGESTION_SCHEDULE_MAX_RESULTS: "${INGESTION_SCHEDULE_MAX_RESULTS:-25}"
+      PREFECT_API_URL: "http://prefect-server:4200/api"
+      PREFECT_SERVER_ANALYTICS_ENABLED: "false"
+      HF_TOKEN:
+    volumes:
+      - hf_cache:/home/app/.cache/huggingface
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
 
   # volumes:
   #   redis_data:
@@ -262,3 +323,4 @@ volumes:
   hf_cache:
   prometheus_data:
   grafana_data:
+  prefect_data:

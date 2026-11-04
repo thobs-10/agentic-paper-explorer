@@ -19,7 +19,7 @@ overview; everything here is the detailed engineering record.
 | [phases/phase-6-monitoring.md](phases/phase-6-monitoring.md) | Metrics, feedback, Grafana dashboard |
 | [phases/phase-7-cicd.md](phases/phase-7-cicd.md) | CI/CD gates and Docker Hub publishing |
 | [phases/phase-8-security-guardrails.md](phases/phase-8-security-guardrails.md) | Prompt-injection, PII, and context guardrails (in-process + Presidio via LiteLLM) |
-| [phases/phase-9-orchestration.md](phases/phase-9-orchestration.md) | Planned: Prefect orchestration for ingestion (priority 3) |
+| [phases/phase-9-orchestration.md](phases/phase-9-orchestration.md) | Prefect flows, scheduled deployments, and the Prefect server for ingestion |
 | [phases/phase-10-agentic-tracing.md](phases/phase-10-agentic-tracing.md) | Planned: Opik agentic/LLM-call tracing (priority 4) |
 | [phases/phase-11-evaluation.md](phases/phase-11-evaluation.md) | Planned: RAGAS evaluation harness (priority 5) |
 

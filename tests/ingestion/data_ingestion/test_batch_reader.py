@@ -3,8 +3,10 @@
 import asyncio
 
 from agentic_paper_explorer.ingestion.data_ingestion.arxiv_client import (
+    NEWEST_FIRST,
     ArxivPaperRecord,
     ArxivSearchResult,
+    ArxivSort,
 )
 from agentic_paper_explorer.ingestion.data_ingestion.batch_reader import iter_arxiv_papers
 
@@ -30,10 +32,12 @@ class FakeArxivClient:
     def __init__(self, pages: list[ArxivSearchResult]) -> None:
         self._pages = pages
         self.calls: list[dict[str, object]] = []
+        self.sorts: list[ArxivSort | None] = []
 
     async def search_papers(
-        self, *, search_query: str, start: int, max_results: int
+        self, *, search_query: str, start: int, max_results: int, sort: ArxivSort | None = None
     ) -> ArxivSearchResult:
+        self.sorts.append(sort)
         self.calls.append(
             {"search_query": search_query, "start": start, "max_results": max_results}
         )
@@ -95,3 +99,33 @@ def test_iter_arxiv_papers_stops_when_max_total_results_reached() -> None:
 
     assert len(result) == 1
     assert len(client.calls) == 1
+
+
+def test_iter_arxiv_papers_applies_sort_to_every_page() -> None:
+    pages = [
+        ArxivSearchResult(
+            total_results=3,
+            start_index=0,
+            items_per_page=2,
+            papers=[_make_paper("p1"), _make_paper("p2")],
+        ),
+        ArxivSearchResult(
+            total_results=3, start_index=2, items_per_page=2, papers=[_make_paper("p3")]
+        ),
+    ]
+    client = FakeArxivClient(pages)
+
+    asyncio.run(
+        _collect_pages(client, search_query="all:rag", max_results_per_page=2, sort=NEWEST_FIRST)
+    )
+
+    assert client.sorts == [NEWEST_FIRST, NEWEST_FIRST]
+
+
+def test_iter_arxiv_papers_leaves_sort_unset_by_default() -> None:
+    pages = [ArxivSearchResult(total_results=1, start_index=0, items_per_page=1, papers=[])]
+    client = FakeArxivClient(pages)
+
+    asyncio.run(_collect_pages(client, search_query="all:rag", max_results_per_page=1))
+
+    assert client.sorts == [None]
