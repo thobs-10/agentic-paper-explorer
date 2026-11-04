@@ -60,16 +60,25 @@ def test_build_deployments_rejects_queries_with_colliding_names() -> None:
         build_deployments(settings)
 
 
-def test_main_serves_built_deployments(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_main_serves_built_deployments_one_run_at_a_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     served: list[RunnerDeployment] = []
+    serve_options: dict[str, object] = {}
+
+    def fake_serve(*deployments: RunnerDeployment, **options: object) -> None:
+        served.extend(deployments)
+        serve_options.update(options)
+
     monkeypatch.setattr(deployment_module, "get_settings", lambda: _settings())
-    monkeypatch.setattr(deployment_module, "serve", lambda *deployments: served.extend(deployments))
+    monkeypatch.setattr(deployment_module, "serve", fake_serve)
 
     assert deployment_module.main() == 0
     assert [d.name for d in served] == [
         "all-retrieval-augmented-generation",
         "all-large-language-model-agents",
     ]
+    assert serve_options == {"limit": 1}
 
 
 def test_main_returns_error_when_no_queries_configured(monkeypatch: pytest.MonkeyPatch) -> None:

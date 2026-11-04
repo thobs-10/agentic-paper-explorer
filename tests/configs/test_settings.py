@@ -68,7 +68,7 @@ def test_settings_defaults_when_no_env_vars_set(monkeypatch: pytest.MonkeyPatch)
         'all:"retrieval augmented generation"',
         'all:"large language model agents"',
     ]
-    assert settings.ingestion_schedule_cron == "0 2 * * *"
+    assert settings.ingestion_schedule_cron == "0 2 15 * *"
     assert settings.ingestion_schedule_timezone == "UTC"
     assert settings.ingestion_schedule_max_results == 25
 
