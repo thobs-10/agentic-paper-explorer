@@ -106,7 +106,8 @@ class Settings(BaseSettings):
     ingestion_schedule_queries: list[str] = Field(
         default_factory=lambda: list(DEFAULT_INGESTION_SCHEDULE_QUERIES)
     )
-    ingestion_schedule_cron: str = "0 2 * * *"
+    # Monthly on the 15th at 02:00; new papers on a topic accumulate slowly, so daily runs add little.
+    ingestion_schedule_cron: str = "0 2 15 * *"
     ingestion_schedule_timezone: str = "UTC"
     ingestion_schedule_max_results: int = 25
 

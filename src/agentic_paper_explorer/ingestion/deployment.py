@@ -1,4 +1,4 @@
-"""Serve nightly scheduled deployments of the ingestion flow.
+"""Serve scheduled deployments of the ingestion flow.
 
 One deployment per configured query, all served from this long-running process via
 `prefect.serve`, so no work pool or worker is needed. Each query shows up as its own
@@ -63,7 +63,7 @@ def build_deployments(settings: Settings) -> list[RunnerDeployment]:
                     "max_total_results": settings.ingestion_schedule_max_results,
                 },
                 tags=list(DEPLOYMENT_TAGS),
-                description=f"Nightly arXiv ingestion for {query}",
+                description=f"Scheduled arXiv ingestion for {query}",
                 entrypoint_type=EntrypointType.MODULE_PATH,
             ),
         )
@@ -79,7 +79,9 @@ def main() -> int:
         logger.error("No scheduled ingestion queries configured; nothing to serve.")
         return 1
     logger.info("Serving %d scheduled ingestion deployment(s)", len(deployments))
-    serve(*deployments)
+    # limit=1: every deployment shares one cron time, and each run loads its own copy of the
+    # embedding model, so concurrent runs would multiply peak memory. Runs queue instead.
+    serve(*deployments, limit=1)
     return 0
 
 
